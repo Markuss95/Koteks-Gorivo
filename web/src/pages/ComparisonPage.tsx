@@ -1,0 +1,262 @@
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { api } from '../api';
+import type { ComparisonResult, MachineComparison } from '../types';
+import { daysAgo, fmt, shortModel, today } from '../util';
+import { MachineDetail } from '../components/MachineDetail';
+
+type SortKey =
+  | 'model'
+  | 'marisIssuedLitres'
+  | 'lidatConsumedLitres'
+  | 'differenceLitres'
+  | 'variancePct';
+
+// Fallback floor until the backend reports the authoritative value.
+const MIN_DATE_FALLBACK = '2026-05-27';
+
+export function ComparisonPage() {
+  const [from, setFrom] = useState(daysAgo(10));
+  const [to, setTo] = useState(today());
+  const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
+  const [data, setData] = useState<ComparisonResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({
+    key: 'differenceLitres',
+    dir: -1,
+  });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [onlyWithData, setOnlyWithData] = useState(false);
+
+  const run = () => {
+    setLoading(true);
+    setError(null);
+    api
+      .comparison(from, to)
+      .then(setData)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    // Pull the authoritative data floor from the backend and clamp if needed.
+    api
+      .settings()
+      .then((s) => {
+        setMinDate(s.minDate);
+        setFrom((f) => (f < s.minDate ? s.minDate : f));
+      })
+      .catch(() => {});
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    let r = [...data.machines];
+    if (onlyWithData) r = r.filter((m) => m.lidatConsumedLitres !== null || m.marisIssuedLitres > 0);
+    r.sort((a, b) => {
+      const av = valueFor(a, sort.key);
+      const bv = valueFor(b, sort.key);
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv as string) * sort.dir;
+      return ((av as number) - (bv as number)) * sort.dir;
+    });
+    return r;
+  }, [data, sort, onlyWithData]);
+
+  const chartData = useMemo(
+    () =>
+      rows
+        .filter((m) => m.marisIssuedLitres > 0 || (m.lidatConsumedLitres ?? 0) > 0)
+        .slice(0, 25)
+        .map((m) => ({
+          name: `${shortModel(m.model)} ${m.serialNumber}`,
+          serial: m.serialNumber,
+          Maris: m.marisIssuedLitres,
+          LiDAT: m.lidatConsumedLitres ?? 0,
+        })),
+    [rows],
+  );
+
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="field">
+          <label>Od datuma</label>
+          <input type="date" value={from} min={minDate} max={to} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Do datuma</label>
+          <input type="date" value={to} min={from || minDate} max={today()} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        <button className="btn" onClick={run} disabled={loading}>
+          {loading ? 'Učitavanje…' : 'Usporedi'}
+        </button>
+        <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={onlyWithData}
+            onChange={(e) => setOnlyWithData(e.target.checked)}
+          />
+          <span className="muted">Samo strojevi s podacima</span>
+        </label>
+        <div style={{ marginLeft: 'auto' }} className="muted">
+          {data && `Gorivo (artikli): ${data.fuelArticleCodes.join(', ')}`}
+        </div>
+      </div>
+
+      {error && <div className="error-box">{error}</div>}
+
+      {data && (
+        <div className="cards">
+          <div className="card">
+            <div className="label">Maris — izdano</div>
+            <div className="value maris">{fmt(data.totals.marisIssuedLitres)} L</div>
+            <div className="sub">iz skladišta (izdatnice)</div>
+          </div>
+          <div className="card">
+            <div className="label">LiDAT — potrošeno</div>
+            <div className="value lidat">{fmt(data.totals.lidatConsumedLitres)} L</div>
+            <div className="sub">
+              stvarna potrošnja · {data.totals.machinesWithLidatData}/{data.totals.machinesTotal} strojeva
+            </div>
+          </div>
+          <div className="card">
+            <div className="label">Razlika</div>
+            <div
+              className={`value ${data.totals.differenceLitres >= 0 ? 'pos' : 'neg'}`}
+              style={{ color: undefined }}
+            >
+              {data.totals.differenceLitres >= 0 ? '+' : ''}
+              {fmt(data.totals.differenceLitres)} L
+            </div>
+            <div className="sub">izdano − potrošeno</div>
+          </div>
+          <div className="card">
+            <div className="label">Odstupanje</div>
+            <div className="value">
+              {data.totals.lidatConsumedLitres > 0
+                ? `${((data.totals.differenceLitres / data.totals.lidatConsumedLitres) * 100).toFixed(1)}%`
+                : '—'}
+            </div>
+            <div className="sub">razlika / potrošeno</div>
+          </div>
+        </div>
+      )}
+
+      {chartData.length > 0 && (
+        <div className="panel">
+          <h2>Izdano (Maris) vs potrošeno (LiDAT) — po stroju, L</h2>
+          <ResponsiveContainer width="100%" height={Math.max(280, chartData.length * 26)}>
+            <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2b3742" horizontal={false} />
+              <XAxis type="number" stroke="#8b9bab" />
+              <YAxis type="category" dataKey="name" width={150} stroke="#8b9bab" tick={{ fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: '#182027', border: '1px solid #2b3742', color: '#e6edf3' }}
+                formatter={(v: number) => `${fmt(v)} L`}
+              />
+              <Legend />
+              <Bar dataKey="Maris" fill="#4aa3ff" />
+              <Bar dataKey="LiDAT" fill="#f5a623" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div className="panel">
+        <h2>Detalji po stroju</h2>
+        <table>
+          <thead>
+            <tr>
+              <Th label="Stroj" onClick={() => toggleSort('model')} active={sort.key === 'model'} dir={sort.dir} />
+              <th>Radni nalog</th>
+              <Th label="Maris izdano (L)" num onClick={() => toggleSort('marisIssuedLitres')} active={sort.key === 'marisIssuedLitres'} dir={sort.dir} />
+              <Th label="LiDAT potroš. (L)" num onClick={() => toggleSort('lidatConsumedLitres')} active={sort.key === 'lidatConsumedLitres'} dir={sort.dir} />
+              <Th label="Razlika (L)" num onClick={() => toggleSort('differenceLitres')} active={sort.key === 'differenceLitres'} dir={sort.dir} />
+              <Th label="Odstup." num onClick={() => toggleSort('variancePct')} active={sort.key === 'variancePct'} dir={sort.dir} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((m) => (
+              <tr key={m.serialNumber} className="clickable" onClick={() => setSelected(m.serialNumber)}>
+                <td>
+                  <strong>{shortModel(m.model)}</strong> <span className="muted">{m.serialNumber}</span>
+                  {m.lidatPartial && (
+                    <span className="pill warn" title="Nema očitanja prije početka razdoblja — potrošnja je podcijenjena">
+                      djelomično
+                    </span>
+                  )}
+                </td>
+                <td className="muted">{m.rnalogs.join(', ') || '—'}</td>
+                <td className="num">{fmt(m.marisIssuedLitres, 1)}</td>
+                <td className="num">{m.lidatConsumedLitres === null ? '—' : fmt(m.lidatConsumedLitres, 1)}</td>
+                <td className={`num ${(m.differenceLitres ?? 0) >= 0 ? 'pos' : 'neg'}`}>
+                  {m.differenceLitres === null ? '—' : `${m.differenceLitres >= 0 ? '+' : ''}${fmt(m.differenceLitres, 1)}`}
+                </td>
+                <td className={`num ${(m.variancePct ?? 0) >= 0 ? 'pos' : 'neg'}`}>
+                  {m.variancePct === null ? '—' : `${m.variancePct >= 0 ? '+' : ''}${m.variancePct.toFixed(1)}%`}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && !loading && (
+              <tr>
+                <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                  Nema podataka za odabrano razdoblje.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && (
+        <MachineDetail serial={selected} from={from} to={to} onClose={() => setSelected(null)} />
+      )}
+    </>
+  );
+}
+
+function valueFor(m: MachineComparison, key: SortKey): number | string | null {
+  switch (key) {
+    case 'model':
+      return `${shortModel(m.model)} ${m.serialNumber}`;
+    default:
+      return m[key];
+  }
+}
+
+function Th({
+  label,
+  onClick,
+  active,
+  dir,
+  num,
+}: {
+  label: string;
+  onClick: () => void;
+  active: boolean;
+  dir: 1 | -1;
+  num?: boolean;
+}) {
+  return (
+    <th className={num ? 'num' : ''} onClick={onClick}>
+      {label} {active ? (dir === 1 ? '▲' : '▼') : ''}
+    </th>
+  );
+}

@@ -1,0 +1,20 @@
+{
+  "name": "koteks-gorivo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compare fuel consumption: Maris ERP (issued) vs LiDAT telematics (actual) for Liebherr machines",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspace server && npm run build --workspace web",
+    "start": "npm run start --workspace server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

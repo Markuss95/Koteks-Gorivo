@@ -1,0 +1,52 @@
+# Render Blueprint — backend API + scheduled LiDAT sync.
+# Deploy: Render Dashboard → New → Blueprint → select this repo.
+# Secrets (sync:false) are entered in the Render dashboard, never committed.
+services:
+  - type: web
+    name: koteks-gorivo-api
+    runtime: node
+    plan: starter            # always-on (no spin-down) so the 6-hourly sync keeps running
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api
+    autoDeploy: true
+
+    # Persistent disk so the accumulated LiDAT history survives deploys/restarts.
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_VERSION
+        value: "18"
+      - key: DB_PATH
+        value: /data/koteks-gorivo.db
+
+      # Non-secret defaults
+      - key: MARIS_BASE_URL
+        value: https://portal.osijek-koteks.hr
+      - key: LIDAT_BASE_URL
+        value: https://www.lidatexternal.liebherr.com/LidatExternal/Service.svc
+      - key: LIDAT_SYNC_CRON
+        value: "0 */6 * * *"
+      - key: LIDAT_SYNC_ON_START
+        value: "true"
+      - key: FUEL_ARTICLE_CODES
+        value: "06010001"
+      - key: DATA_MIN_DATE
+        value: "2026-05-27"
+
+      # Secrets — set these in the Render dashboard (Environment tab)
+      - key: MARIS_CLIENT_ID
+        sync: false
+      - key: MARIS_CLIENT_SECRET
+        sync: false
+      - key: LIDAT_USERNAME
+        sync: false
+      - key: LIDAT_PASSWORD
+        sync: false
+      # Set to your Netlify site URL once known, e.g. https://koteks-gorivo.netlify.app
+      - key: CORS_ORIGIN
+        sync: false
