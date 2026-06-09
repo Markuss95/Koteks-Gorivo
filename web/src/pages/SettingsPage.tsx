@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import type { Settings } from '../types';
 
 export function SettingsPage() {
-  const [settings, setSettings] = useState<Settings | null>(null);
   const [codes, setCodes] = useState<string[]>([]);
   const [newCode, setNewCode] = useState('');
   const [saved, setSaved] = useState(false);
@@ -12,10 +10,7 @@ export function SettingsPage() {
   useEffect(() => {
     api
       .settings()
-      .then((s) => {
-        setSettings(s);
-        setCodes(s.fuelArticleCodes);
-      })
+      .then((s) => setCodes(s.fuelArticleCodes))
       .catch((e) => setError(e.message));
   }, []);
 
@@ -35,7 +30,6 @@ export function SettingsPage() {
     setError(null);
     try {
       const s = await api.updateSettings(codes);
-      setSettings(s);
       setCodes(s.fuelArticleCodes);
       setSaved(true);
     } catch (e) {
@@ -80,18 +74,6 @@ export function SettingsPage() {
             Spremi
           </button>
           {saved && <span className="pos">Spremljeno ✓</span>}
-        </div>
-      </div>
-
-      <div className="panel" style={{ maxWidth: 640 }}>
-        <h2>Sinkronizacija</h2>
-        <p className="muted">
-          LiDAT poslužuje samo zadnjih 14 dana uživo, pa pozadinski proces povremeno dohvaća i pohranjuje
-          očitanja kako bi se omogućila usporedba i za starija razdoblja.
-        </p>
-        <div className="muted">
-          Cron raspored: <code>{settings?.syncCron ?? '—'}</code> (mijenja se u <code>server/.env</code>,
-          varijabla <code>LIDAT_SYNC_CRON</code>)
         </div>
       </div>
     </>
