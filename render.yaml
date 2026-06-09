@@ -5,6 +5,7 @@ services:
   - type: web
     name: koteks-gorivo-api
     runtime: node
+    region: frankfurt        # EU region — closest to the Croatian Maris server & LiDAT
     plan: starter            # always-on (no spin-down) so the 6-hourly sync keeps running
     rootDir: server
     buildCommand: npm install && npm run build
