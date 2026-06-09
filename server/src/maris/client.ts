@@ -145,6 +145,16 @@ export async function marisHealth(): Promise<{ ok: boolean; message: string }> {
     await getToken();
     return { ok: true, message: 'Token acquired' };
   } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    // Walk the cause chain to surface the real reason (TLS vs network/DNS).
+    let msg = err instanceof Error ? err.message : String(err);
+    let cause: any = (err as any)?.cause;
+    const codes: string[] = [];
+    while (cause) {
+      if (cause.code) codes.push(String(cause.code));
+      else if (cause.message) codes.push(String(cause.message));
+      cause = cause.cause;
+    }
+    if (codes.length) msg += ` [${codes.join(' <- ')}]`;
+    return { ok: false, message: msg };
   }
 }
