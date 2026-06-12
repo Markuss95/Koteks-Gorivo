@@ -34,7 +34,10 @@ export async function runLidatSync(): Promise<{
        make_code = COALESCE(@makeCode, make_code),
        model = COALESCE(NULLIF(@lidatModel, ''), model),
        equipment_id = COALESCE(@equipmentId, equipment_id),
-       fuel_tank_capacity = COALESCE(@fuelTankCapacity, fuel_tank_capacity)
+       fuel_tank_capacity = COALESCE(@fuelTankCapacity, fuel_tank_capacity),
+       latitude = COALESCE(@latitude, latitude),
+       longitude = COALESCE(@longitude, longitude),
+       location_time = COALESCE(@locationTime, location_time)
      WHERE serial_number = @serialNumber`,
   );
 
@@ -78,6 +81,9 @@ export async function runLidatSync(): Promise<{
           lidatModel: eq.model || '',
           equipmentId: eq.equipmentId || null,
           fuelTankCapacity: eq.fuelTankCapacity ?? null,
+          latitude: eq.latitude ?? null,
+          longitude: eq.longitude ?? null,
+          locationTime: eq.locationTime ?? null,
         });
         if (eq.fuelConsumedCum !== undefined && eq.fuelDateTime) {
           const r = upsertReading.run({

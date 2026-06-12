@@ -11,6 +11,11 @@ export interface LidatEquipment {
   fuelConsumedCum?: number;
   fuelUnits?: string;
   fuelDateTime?: string;
+  // Last known GPS position from the fleet snapshot (ISO 15143-3 Location)
+  latitude?: number;
+  longitude?: number;
+  altitude?: number;
+  locationTime?: string;
 }
 
 export interface LidatFuelReading {
@@ -68,6 +73,32 @@ function parseEquipmentHeader(eq: any): Pick<
   };
 }
 
+/**
+ * Parse the ISO 15143-3 <Location> block (last known GPS position).
+ * Lat/Long/Altitude are child elements; the timestamp may arrive either as a
+ * `datetime` attribute (as FuelUsed does) or a <DateTime> child, so we accept both.
+ */
+function parseLocation(eq: any): Pick<
+  LidatEquipment,
+  'latitude' | 'longitude' | 'altitude' | 'locationTime'
+> {
+  const loc = toArray(eq?.Location)[0];
+  if (!loc) return {};
+  const lat = loc.Latitude !== undefined ? Number(loc.Latitude) : undefined;
+  const lon = loc.Longitude !== undefined ? Number(loc.Longitude) : undefined;
+  // Reject missing / non-numeric coordinates so the map never plots (0,0).
+  if (lat === undefined || lon === undefined || Number.isNaN(lat) || Number.isNaN(lon)) {
+    return {};
+  }
+  const dt = loc['@_datetime'] ?? loc['@_DateTime'] ?? loc.DateTime;
+  return {
+    latitude: lat,
+    longitude: lon,
+    altitude: loc.Altitude !== undefined ? Number(loc.Altitude) : undefined,
+    locationTime: dt !== undefined ? String(dt) : undefined,
+  };
+}
+
 /** Pull all pages of the current fleet snapshot. */
 export async function fetchFleetSnapshot(): Promise<LidatEquipment[]> {
   const out: LidatEquipment[] = [];
@@ -94,6 +125,7 @@ export async function fetchFleetSnapshot(): Promise<LidatEquipment[]> {
         fuelUnits: fuelUsed?.FuelUnits ? String(fuelUsed.FuelUnits) : undefined,
         // DateTime is a `datetime` attribute on the FuelUsed element.
         fuelDateTime: fuelUsed?.['@_datetime'] ? String(fuelUsed['@_datetime']) : undefined,
+        ...parseLocation(eq),
       });
     }
 

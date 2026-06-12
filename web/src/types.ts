@@ -7,6 +7,9 @@ export interface Machine {
   fuelTankCapacity: number | null;
   active: boolean;
   notes: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationTime: string | null;
   rnalogs: string[];
   lidatReadingCount: number;
   lastReadingTime: string | null;

@@ -4,8 +4,9 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "web"],
-      "port": 5173
+      "runtimeArgs": ["run", "dev", "--workspace", "web", "--", "--port", "5188", "--strictPort"],
+      "port": 5188,
+      "autoPort": false
     }
   ]
 }

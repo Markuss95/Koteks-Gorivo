@@ -9,6 +9,9 @@ export interface Machine {
   fuelTankCapacity: number | null;
   active: boolean;
   notes: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationTime: string | null;
   rnalogs: string[];
   lidatReadingCount: number;
   lastReadingTime: string | null;
@@ -19,6 +22,7 @@ export function listMachines(): Machine[] {
     .prepare(
       `SELECT m.serial_number, m.model, m.oem_name, m.make_code, m.equipment_id,
               m.fuel_tank_capacity, m.active, m.notes,
+              m.latitude, m.longitude, m.location_time,
               (SELECT COUNT(*) FROM lidat_fuel_reading r WHERE r.serial_number = m.serial_number) AS reading_count,
               (SELECT MAX(reading_time) FROM lidat_fuel_reading r WHERE r.serial_number = m.serial_number) AS last_reading
        FROM machine m
@@ -39,6 +43,9 @@ export function listMachines(): Machine[] {
     fuelTankCapacity: r.fuel_tank_capacity,
     active: !!r.active,
     notes: r.notes,
+    latitude: r.latitude,
+    longitude: r.longitude,
+    locationTime: r.location_time,
     rnalogs: (rnalogStmt.all(r.serial_number) as Array<{ rnalog: string }>).map((x) => x.rnalog),
     lidatReadingCount: r.reading_count,
     lastReadingTime: r.last_reading,

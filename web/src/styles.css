@@ -138,3 +138,52 @@ tbody tr.clickable { cursor: pointer; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .tag button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; }
+
+/* ---- Machines map (Leaflet) ---- */
+.map-head { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+.map-head h2 { margin: 0; }
+.map-select { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.map-select select { min-width: 220px; }
+.map-wrap { height: 460px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.leaflet-container { background: var(--bg); font: inherit; }
+
+/* Highlight the row of the machine focused on the map. */
+tbody tr.selected-row { background: rgba(245,166,35,0.14); }
+tbody tr.selected-row:hover { background: rgba(245,166,35,0.2); }
+
+/* CSS-only amber pin with a model label beside it. */
+.machine-pin { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.machine-pin__dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #1a1205;
+  box-shadow: 0 0 0 1px var(--accent), 0 1px 4px rgba(0,0,0,0.6);
+  flex: 0 0 auto;
+}
+.machine-pin__label {
+  font-size: 11px; font-weight: 600; color: var(--text);
+  background: rgba(15,20,24,0.78); padding: 1px 5px; border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* Selected machine stands out: larger blue dot + accented label. */
+.machine-pin.selected { z-index: 1000 !important; }
+.machine-pin.selected .machine-pin__dot {
+  background: var(--maris);
+  box-shadow: 0 0 0 2px var(--maris), 0 0 10px 2px rgba(74,163,255,0.7);
+  transform: scale(1.35);
+}
+.machine-pin.selected .machine-pin__label {
+  color: #fff; border-color: var(--maris);
+}
+
+/* Dark-theme the Leaflet popup and zoom controls. */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+}
+.leaflet-popup-content { margin: 10px 12px; line-height: 1.5; }
+.leaflet-popup-content a.leaflet-popup-close-button { color: var(--muted); }
+.leaflet-bar a, .leaflet-bar a:hover {
+  background: var(--panel-2); color: var(--text); border-bottom-color: var(--border);
+}
+.leaflet-control-attribution { background: rgba(15,20,24,0.7) !important; color: var(--muted); }
+.leaflet-control-attribution a { color: var(--maris); }

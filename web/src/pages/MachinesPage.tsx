@@ -1,7 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { HealthResponse, Machine } from '../types';
 import { fmtDateTime, shortModel } from '../util';
+import { MachinesMap } from '../components/MachinesMap';
+
+type SortKey = 'model' | 'serialNumber' | 'equipmentId' | 'lidatReadingCount' | 'lastReadingTime';
+
+function valueFor(m: Machine, key: SortKey): number | string | null {
+  if (key === 'model') return `${shortModel(m.model)} ${m.serialNumber}`;
+  return m[key];
+}
 
 export function MachinesPage({
   health,
@@ -14,6 +22,33 @@ export function MachinesPage({
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Default: most recent reading first.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'lastReadingTime', dir: -1 });
+  // Selected machine to focus on the map (null = show all).
+  const [selected, setSelected] = useState<string | null>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
+
+  // Select a machine from the table and bring the map into view.
+  const focusMachine = (serial: string) => {
+    setSelected(serial);
+    mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const sorted = useMemo(() => {
+    const r = [...machines];
+    r.sort((a, b) => {
+      const av = valueFor(a, sort.key);
+      const bv = valueFor(b, sort.key);
+      if (av === null) return 1; // nulls always last
+      if (bv === null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv as string) * sort.dir;
+      return ((av as number) - (bv as number)) * sort.dir;
+    });
+    return r;
+  }, [machines, sort]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
 
   const load = () => {
     setLoading(true);
@@ -65,6 +100,10 @@ export function MachinesPage({
 
       {error && <div className="error-box">{error}</div>}
 
+      <div ref={mapRef}>
+        <MachinesMap machines={machines} selected={selected} onSelect={setSelected} />
+      </div>
+
       {last && (
         <div className="panel">
           <h2>Zadnja sinkronizacija</h2>
@@ -89,18 +128,25 @@ export function MachinesPage({
           <table>
             <thead>
               <tr>
-                <th>Model</th>
-                <th>Serijski broj</th>
+                <Th label="Model" onClick={() => toggleSort('model')} active={sort.key === 'model'} dir={sort.dir} />
+                <Th label="Serijski broj" onClick={() => toggleSort('serialNumber')} active={sort.key === 'serialNumber'} dir={sort.dir} />
                 <th>LiDAT model</th>
-                <th>EquipmentID</th>
+                <Th label="EquipmentID" onClick={() => toggleSort('equipmentId')} active={sort.key === 'equipmentId'} dir={sort.dir} />
                 <th>Radni nalozi</th>
-                <th className="num">Očitanja</th>
-                <th>Zadnje očitanje</th>
+                <Th label="Očitanja" num onClick={() => toggleSort('lidatReadingCount')} active={sort.key === 'lidatReadingCount'} dir={sort.dir} />
+                <Th label="Zadnje očitanje" onClick={() => toggleSort('lastReadingTime')} active={sort.key === 'lastReadingTime'} dir={sort.dir} />
               </tr>
             </thead>
             <tbody>
-              {machines.map((m) => (
-                <tr key={m.serialNumber}>
+              {sorted.map((m) => {
+                const located = m.latitude != null && m.longitude != null;
+                return (
+                <tr
+                  key={m.serialNumber}
+                  className={`${located ? 'clickable' : ''}${m.serialNumber === selected ? ' selected-row' : ''}`}
+                  onClick={located ? () => focusMachine(m.serialNumber) : undefined}
+                  title={located ? 'Prikaži na karti' : 'Nema GPS pozicije'}
+                >
                   <td><strong>{shortModel(m.model)}</strong></td>
                   <td>{m.serialNumber}</td>
                   <td className="muted" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.makeCode ?? ''}>
@@ -111,11 +157,32 @@ export function MachinesPage({
                   <td className="num">{m.lidatReadingCount}</td>
                   <td className="muted">{fmtDateTime(m.lastReadingTime)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
     </>
+  );
+}
+
+function Th({
+  label,
+  onClick,
+  active,
+  dir,
+  num,
+}: {
+  label: string;
+  onClick: () => void;
+  active: boolean;
+  dir: 1 | -1;
+  num?: boolean;
+}) {
+  return (
+    <th className={num ? 'num' : ''} onClick={onClick}>
+      {label} {active ? (dir === 1 ? '▲' : '▼') : ''}
+    </th>
   );
 }

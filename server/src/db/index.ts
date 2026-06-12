@@ -20,7 +20,10 @@ export function initSchema(): void {
       equipment_id  TEXT,
       fuel_tank_capacity REAL,
       active        INTEGER NOT NULL DEFAULT 1,
-      notes         TEXT
+      notes         TEXT,
+      latitude      REAL,                       -- last known GPS position (ISO 15143-3 Location)
+      longitude     REAL,
+      location_time TEXT                         -- ISO 8601 UTC of that fix
     );
 
     CREATE TABLE IF NOT EXISTS machine_rnalog (
@@ -60,6 +63,14 @@ export function initSchema(): void {
       message      TEXT
     );
   `);
+
+  // Migrate older databases that predate the Location columns on `machine`.
+  const machineCols = new Set(
+    (db.prepare('PRAGMA table_info(machine)').all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!machineCols.has('latitude')) db.exec('ALTER TABLE machine ADD COLUMN latitude REAL');
+  if (!machineCols.has('longitude')) db.exec('ALTER TABLE machine ADD COLUMN longitude REAL');
+  if (!machineCols.has('location_time')) db.exec('ALTER TABLE machine ADD COLUMN location_time TEXT');
 }
 
 // ---- Settings helpers ----

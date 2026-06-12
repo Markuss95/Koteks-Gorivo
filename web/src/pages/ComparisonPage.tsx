@@ -163,7 +163,16 @@ export function ComparisonPage() {
         <div className="panel">
           <h2>Izdano (Maris) vs potrošeno (LiDAT) — po stroju, L</h2>
           <ResponsiveContainer width="100%" height={Math.max(280, chartData.length * 26)}>
-            <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 20 }}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ left: 40, right: 20 }}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const serial = state?.activePayload?.[0]?.payload?.serial;
+                if (serial) setSelected(serial);
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#2b3742" horizontal={false} />
               <XAxis type="number" stroke="#8b9bab" />
               <YAxis type="category" dataKey="name" width={150} stroke="#8b9bab" tick={{ fontSize: 11 }} />
