@@ -1,5 +1,10 @@
 import { db } from '../db/index.js';
-import { fetchFleetSnapshot, fetchCumulativeFuelUsed } from '../lidat/client.js';
+import {
+  fetchFleetSnapshot,
+  fetchCumulativeFuelUsed,
+  fetchLocationHistory,
+  type LidatLocationReading,
+} from '../lidat/client.js';
 
 let syncing = false;
 
@@ -50,6 +55,41 @@ export async function runLidatSync(): Promise<{
        fetched_at = excluded.fetched_at`,
   );
 
+  // Keep the latest fix per (machine, UTC day); only overwrite with a newer one.
+  const upsertLocation = db.prepare(
+    `INSERT INTO lidat_location (serial_number, day, reading_time, latitude, longitude, fetched_at)
+     VALUES (@serial, @day, @time, @lat, @lng, @fetchedAt)
+     ON CONFLICT(serial_number, day) DO UPDATE SET
+       reading_time = excluded.reading_time,
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       fetched_at = excluded.fetched_at
+     WHERE excluded.reading_time > lidat_location.reading_time`,
+  );
+
+  // Reduce a location time series to the latest fix per UTC day and upsert them.
+  const storeDailyLocations = (serial: string, readings: LidatLocationReading[], fetchedAt: string) => {
+    const latestPerDay = new Map<string, LidatLocationReading>();
+    for (const r of readings) {
+      const day = r.dateTime.slice(0, 10);
+      const prev = latestPerDay.get(day);
+      if (!prev || r.dateTime > prev.dateTime) latestPerDay.set(day, r);
+    }
+    const tx = db.transaction(() => {
+      for (const [day, r] of latestPerDay) {
+        upsertLocation.run({
+          serial,
+          day,
+          time: r.dateTime,
+          lat: r.latitude,
+          lng: r.longitude,
+          fetchedAt,
+        });
+      }
+    });
+    tx();
+  };
+
   const startedAt = new Date().toISOString();
   const logRes = db
     .prepare(`INSERT INTO sync_log (started_at, status) VALUES (?, 'running')`)
@@ -95,6 +135,18 @@ export async function runLidatSync(): Promise<{
           });
           readingsAdded += r.changes;
         }
+        // Current snapshot position → today's location row (so the map works
+        // even before the per-machine history backfill below has run).
+        if (eq.latitude !== undefined && eq.longitude !== undefined && eq.locationTime) {
+          upsertLocation.run({
+            serial: eq.serialNumber,
+            day: eq.locationTime.slice(0, 10),
+            time: eq.locationTime,
+            lat: eq.latitude,
+            lng: eq.longitude,
+            fetchedAt,
+          });
+        }
       }
     });
     upsertSnapshot();
@@ -138,6 +190,19 @@ export async function runLidatSync(): Promise<{
       } catch (err) {
         machinesFailed++;
         errors.push(`${m.serial_number}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Location history is best-effort: a Locations failure must not fail the
+      // machine's fuel sync, so it runs in its own try/catch.
+      try {
+        const locs = await fetchLocationHistory(
+          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
+          startUtc,
+          endUtc,
+        );
+        storeDailyLocations(m.serial_number, locs, fetchedAt);
+      } catch (err) {
+        errors.push(`${m.serial_number} (location): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 

@@ -51,3 +51,43 @@ export function listMachines(): Machine[] {
     lastReadingTime: r.last_reading,
   }));
 }
+
+export interface MachinePosition {
+  serialNumber: string;
+  model: string;
+  equipmentId: string | null;
+  latitude: number;
+  longitude: number;
+  readingTime: string; // exact UTC time of the plotted fix
+  day: string; // UTC day the fix belongs to (may be earlier than the requested date)
+}
+
+/**
+ * Each machine's position as of `date` (YYYY-MM-DD): the latest stored daily fix
+ * on or before that date. Machines with no fix up to that date are omitted.
+ */
+export function listMachinePositions(date: string): MachinePosition[] {
+  const rows = db
+    .prepare(
+      `SELECT m.serial_number, m.model, m.equipment_id,
+              loc.latitude, loc.longitude, loc.reading_time, loc.day
+       FROM machine m
+       JOIN lidat_location loc ON loc.serial_number = m.serial_number
+       WHERE loc.day = (
+         SELECT MAX(l2.day) FROM lidat_location l2
+         WHERE l2.serial_number = m.serial_number AND l2.day <= ?
+       )
+       ORDER BY m.model, m.serial_number`,
+    )
+    .all(date) as any[];
+
+  return rows.map((r) => ({
+    serialNumber: r.serial_number,
+    model: r.model,
+    equipmentId: r.equipment_id,
+    latitude: r.latitude,
+    longitude: r.longitude,
+    readingTime: r.reading_time,
+    day: r.day,
+  }));
+}

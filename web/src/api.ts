@@ -2,6 +2,7 @@ import type {
   ComparisonResult,
   HealthResponse,
   Machine,
+  MachinePosition,
   MachineSeries,
   Settings,
 } from './types';
@@ -22,6 +23,10 @@ async function get<T>(url: string): Promise<T> {
 export const api = {
   health: () => get<HealthResponse>('/api/health'),
   machines: () => get<{ machines: Machine[] }>('/api/machines').then((r) => r.machines),
+  machinePositions: (date: string) =>
+    get<{ date: string; positions: MachinePosition[] }>(
+      `/api/machines/positions?date=${date}`,
+    ).then((r) => r.positions),
   comparison: (from: string, to: string) =>
     get<ComparisonResult>(`/api/comparison?from=${from}&to=${to}`),
   machineSeries: (serial: string, from: string, to: string) =>

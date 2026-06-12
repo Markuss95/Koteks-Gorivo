@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db, getJsonSetting, setJsonSetting } from './db/index.js';
 import { config } from './config.js';
-import { listMachines } from './services/machines.js';
+import { listMachines, listMachinePositions } from './services/machines.js';
 import { buildComparison, getFuelArticleCodes } from './services/comparison.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
@@ -45,6 +45,17 @@ api.get('/health', async (_req, res) => {
 // ---- Machines ----
 api.get('/machines', (_req, res) => {
   res.json({ machines: listMachines() });
+});
+
+// Machine GPS positions as of a given date (defaults to today). Each machine's
+// latest stored daily fix on or before that date.
+api.get('/machines/positions', (req, res) => {
+  const date = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400).json({ error: 'Expected date=YYYY-MM-DD' });
+    return;
+  }
+  res.json({ date, positions: listMachinePositions(date) });
 });
 
 // Per-machine detail: LiDAT cumulative series + Maris issuances in range.

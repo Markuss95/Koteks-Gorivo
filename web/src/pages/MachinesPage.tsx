@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import type { HealthResponse, Machine } from '../types';
-import { fmtDateTime, shortModel } from '../util';
+import type { HealthResponse, Machine, MachinePosition } from '../types';
+import { fmtDateTime, shortModel, today } from '../util';
 import { MachinesMap } from '../components/MachinesMap';
 
 type SortKey = 'model' | 'serialNumber' | 'equipmentId' | 'lidatReadingCount' | 'lastReadingTime';
+
+// Earliest date with reliable position history (matches the comparison floor).
+const MAP_DATE_FLOOR = '2026-06-01';
 
 function valueFor(m: Machine, key: SortKey): number | string | null {
   if (key === 'model') return `${shortModel(m.model)} ${m.serialNumber}`;
@@ -27,6 +30,20 @@ export function MachinesPage({
   // Selected machine to focus on the map (null = show all).
   const [selected, setSelected] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  // Map date: default today, positions for that date.
+  const [mapDate, setMapDate] = useState(today());
+  const [positions, setPositions] = useState<MachinePosition[]>([]);
+  const [positionsLoading, setPositionsLoading] = useState(true);
+
+  const loadPositions = (date: string) => {
+    setPositionsLoading(true);
+    api
+      .machinePositions(date)
+      .then(setPositions)
+      .catch((e) => setError(e.message))
+      .finally(() => setPositionsLoading(false));
+  };
+  useEffect(() => loadPositions(mapDate), [mapDate]);
 
   // Select a machine from the table and bring the map into view.
   const focusMachine = (serial: string) => {
@@ -73,6 +90,7 @@ export function MachinesPage({
           clearInterval(poll);
           setSyncing(false);
           load();
+          loadPositions(mapDate);
           onSyncDone();
         }
       }, 3000);
@@ -101,7 +119,19 @@ export function MachinesPage({
       {error && <div className="error-box">{error}</div>}
 
       <div ref={mapRef}>
-        <MachinesMap machines={machines} selected={selected} onSelect={setSelected} />
+        <MachinesMap
+          positions={positions}
+          selected={selected}
+          onSelect={setSelected}
+          date={mapDate}
+          onDateChange={(d) => {
+            setSelected(null);
+            setMapDate(d);
+          }}
+          minDate={MAP_DATE_FLOOR}
+          maxDate={today()}
+          loading={positionsLoading}
+        />
       </div>
 
       {last && (

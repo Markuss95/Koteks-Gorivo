@@ -13,6 +13,7 @@ import { api } from '../api';
 import type { ComparisonResult, MachineComparison } from '../types';
 import { daysAgo, fmt, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
+import { DateField } from '../components/DateField';
 import { exportComparisonExcel, exportComparisonPdf } from '../export';
 
 type SortKey =
@@ -24,6 +25,9 @@ type SortKey =
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
+// Hard floor for the date pickers: data before 1 June 2026 is unreliable
+// (incomplete early LiDAT history), so earlier dates are greyed out.
+const DATA_FLOOR = '2026-06-01';
 
 export function ComparisonPage() {
   const [from, setFrom] = useState(daysAgo(10));
@@ -55,7 +59,8 @@ export function ComparisonPage() {
       .settings()
       .then((s) => {
         setMinDate(s.minDate);
-        setFrom((f) => (f < s.minDate ? s.minDate : f));
+        const floor = s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR;
+        setFrom((f) => (f < floor ? floor : f));
       })
       .catch(() => {});
     run();
@@ -94,6 +99,9 @@ export function ComparisonPage() {
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
 
+  // Effective picker floor: never earlier than the 1 June data cutoff.
+  const effectiveMin = minDate > DATA_FLOOR ? minDate : DATA_FLOOR;
+
   const [exporting, setExporting] = useState<null | 'pdf' | 'excel'>(null);
   const runExport = async (kind: 'pdf' | 'excel') => {
     if (!data) return;
@@ -114,11 +122,11 @@ export function ComparisonPage() {
       <div className="toolbar">
         <div className="field">
           <label>Od datuma</label>
-          <input type="date" value={from} min={minDate} max={to} onChange={(e) => setFrom(e.target.value)} />
+          <DateField value={from} min={effectiveMin} max={to} onChange={setFrom} />
         </div>
         <div className="field">
           <label>Do datuma</label>
-          <input type="date" value={to} min={from || minDate} max={today()} onChange={(e) => setTo(e.target.value)} />
+          <DateField value={to} min={from || effectiveMin} max={today()} onChange={setTo} />
         </div>
         <button className="btn" onClick={run} disabled={loading}>
           {loading ? 'Učitavanje…' : 'Usporedi'}

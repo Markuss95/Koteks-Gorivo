@@ -47,6 +47,20 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_lidat_reading_serial_time
       ON lidat_fuel_reading (serial_number, reading_time);
 
+    -- One GPS position per machine per UTC day (ISO 15143-3 Locations), kept as
+    -- the latest fix of that day. Backfilled by the sync; accumulates over time
+    -- so any past day from the data floor onward can be mapped.
+    CREATE TABLE IF NOT EXISTS lidat_location (
+      serial_number TEXT NOT NULL,
+      day           TEXT NOT NULL,           -- UTC calendar day YYYY-MM-DD
+      reading_time  TEXT NOT NULL,           -- exact ISO 8601 UTC time of the fix
+      latitude      REAL NOT NULL,
+      longitude     REAL NOT NULL,
+      fetched_at    TEXT NOT NULL,
+      PRIMARY KEY (serial_number, day),
+      FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS setting (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL

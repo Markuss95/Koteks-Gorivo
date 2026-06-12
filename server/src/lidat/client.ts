@@ -24,6 +24,13 @@ export interface LidatFuelReading {
   fuelUnits?: string;
 }
 
+export interface LidatLocationReading {
+  dateTime: string;
+  latitude: number;
+  longitude: number;
+  altitude?: number;
+}
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -78,24 +85,40 @@ function parseEquipmentHeader(eq: any): Pick<
  * Lat/Long/Altitude are child elements; the timestamp may arrive either as a
  * `datetime` attribute (as FuelUsed does) or a <DateTime> child, so we accept both.
  */
-function parseLocation(eq: any): Pick<
-  LidatEquipment,
-  'latitude' | 'longitude' | 'altitude' | 'locationTime'
-> {
-  const loc = toArray(eq?.Location)[0];
-  if (!loc) return {};
+/**
+ * Parse a single <Location> node (lat/long/altitude + timestamp). The timestamp
+ * may arrive as a `datetime` attribute (as FuelUsed does) or a <DateTime> child.
+ * Returns null for missing / non-numeric coordinates so we never plot (0,0).
+ */
+function parseLocationNode(
+  loc: any,
+): { latitude: number; longitude: number; altitude?: number; dateTime?: string } | null {
+  if (!loc) return null;
   const lat = loc.Latitude !== undefined ? Number(loc.Latitude) : undefined;
   const lon = loc.Longitude !== undefined ? Number(loc.Longitude) : undefined;
-  // Reject missing / non-numeric coordinates so the map never plots (0,0).
   if (lat === undefined || lon === undefined || Number.isNaN(lat) || Number.isNaN(lon)) {
-    return {};
+    return null;
   }
   const dt = loc['@_datetime'] ?? loc['@_DateTime'] ?? loc.DateTime;
   return {
     latitude: lat,
     longitude: lon,
     altitude: loc.Altitude !== undefined ? Number(loc.Altitude) : undefined,
-    locationTime: dt !== undefined ? String(dt) : undefined,
+    dateTime: dt !== undefined ? String(dt) : undefined,
+  };
+}
+
+function parseLocation(eq: any): Pick<
+  LidatEquipment,
+  'latitude' | 'longitude' | 'altitude' | 'locationTime'
+> {
+  const node = parseLocationNode(toArray(eq?.Location)[0]);
+  if (!node) return {};
+  return {
+    latitude: node.latitude,
+    longitude: node.longitude,
+    altitude: node.altitude,
+    locationTime: node.dateTime,
   };
 }
 
@@ -171,6 +194,47 @@ export async function fetchCumulativeFuelUsed(
       });
     }
     if (readings.length < 100) break;
+    page++;
+  }
+
+  return out;
+}
+
+/**
+ * GPS position time series for one machine over [start, end] (ISO 15143-3 Locations).
+ * Same 14-day-window limit as the fuel series, so callers chunk longer ranges.
+ */
+export async function fetchLocationHistory(
+  machine: { oemName: string; model: string; serialNumber: string },
+  startUtc: string,
+  endUtc: string,
+): Promise<LidatLocationReading[]> {
+  const out: LidatLocationReading[] = [];
+  let page = 1;
+  const maxPages = 100;
+  const make = encodeSegment(machine.oemName || 'Liebherr');
+  const model = encodeSegment(machine.model);
+  const serial = encodeSegment(machine.serialNumber);
+
+  while (page <= maxPages) {
+    const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/Locations/${startUtc}/${endUtc}/${page}`;
+    const doc = await fetchXml(suffix);
+    // Time-data root varies by version; accept the common roots and pull <Location> children.
+    const root = doc?.LocationMessages ?? doc?.Locations ?? doc?.Fleet ?? doc;
+    const nodes = toArray(root?.Location);
+
+    if (nodes.length === 0) break;
+    for (const n of nodes) {
+      const parsed = parseLocationNode(n);
+      if (!parsed || parsed.dateTime === undefined) continue;
+      out.push({
+        dateTime: parsed.dateTime,
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        altitude: parsed.altitude,
+      });
+    }
+    if (nodes.length < 100) break;
     page++;
   }
 

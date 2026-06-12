@@ -15,6 +15,16 @@ export interface Machine {
   lastReadingTime: string | null;
 }
 
+export interface MachinePosition {
+  serialNumber: string;
+  model: string;
+  equipmentId: string | null;
+  latitude: number;
+  longitude: number;
+  readingTime: string;
+  day: string;
+}
+
 export interface MachineComparison {
   serialNumber: string;
   model: string;

@@ -147,8 +147,37 @@ tbody tr.clickable { cursor: pointer; }
 /* ---- Machines map (Leaflet) ---- */
 .map-head { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
 .map-head h2 { margin: 0; }
-.map-select { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.map-select select { min-width: 220px; }
+.map-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.map-controls select { min-width: 220px; }
+.map-date { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+
+/* ---- react-datepicker (Croatian, dark theme) ---- */
+.react-datepicker-wrapper { width: auto; }
+.date-input { width: 120px; }
+/* Sit above the Leaflet map panes (which go up to ~700). */
+.react-datepicker-popper { z-index: 1000; }
+.react-datepicker {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  font-family: inherit; font-size: 13px;
+}
+.react-datepicker__header {
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.react-datepicker__current-month,
+.react-datepicker__day-name,
+.react-datepicker__day { color: var(--text); }
+.react-datepicker__day:hover { background: var(--panel); }
+.react-datepicker__day--selected,
+.react-datepicker__day--keyboard-selected {
+  background: var(--accent); color: #1a1205; font-weight: 600;
+}
+.react-datepicker__day--selected:hover { background: var(--accent); filter: brightness(1.08); }
+.react-datepicker__day--today { font-weight: 700; color: var(--accent); }
+.react-datepicker__day--selected.react-datepicker__day--today { color: #1a1205; }
+.react-datepicker__day--disabled { color: var(--muted); opacity: 0.35; }
+.react-datepicker__day--outside-month { color: var(--muted); }
+.react-datepicker__navigation-icon::before { border-color: var(--muted); }
+.react-datepicker__navigation:hover .react-datepicker__navigation-icon::before { border-color: var(--text); }
 .map-wrap { height: 460px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
 .leaflet-container { background: var(--bg); font: inherit; }
 
