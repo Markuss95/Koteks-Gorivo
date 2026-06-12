@@ -13,6 +13,7 @@ import { api } from '../api';
 import type { ComparisonResult, MachineComparison } from '../types';
 import { daysAgo, fmt, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
+import { exportComparisonExcel, exportComparisonPdf } from '../export';
 
 type SortKey =
   | 'model'
@@ -92,6 +93,21 @@ export function ComparisonPage() {
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
+
+  const [exporting, setExporting] = useState<null | 'pdf' | 'excel'>(null);
+  const runExport = async (kind: 'pdf' | 'excel') => {
+    if (!data) return;
+    setExporting(kind);
+    setError(null);
+    try {
+      const fn = kind === 'pdf' ? exportComparisonPdf : exportComparisonExcel;
+      await fn(rows, data, from, to);
+    } catch (e) {
+      setError(`Izvoz nije uspio: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
     <>
@@ -189,7 +205,25 @@ export function ComparisonPage() {
       )}
 
       <div className="panel">
-        <h2>Detalji po stroju</h2>
+        <div className="panel-head">
+          <h2>Detalji po stroju</h2>
+          <div className="panel-actions">
+            <button
+              className="btn secondary"
+              onClick={() => runExport('excel')}
+              disabled={!data || rows.length === 0 || exporting !== null}
+            >
+              {exporting === 'excel' ? 'Izvoz…' : 'Izvoz Excel'}
+            </button>
+            <button
+              className="btn secondary"
+              onClick={() => runExport('pdf')}
+              disabled={!data || rows.length === 0 || exporting !== null}
+            >
+              {exporting === 'pdf' ? 'Izvoz…' : 'Izvoz PDF'}
+            </button>
+          </div>
+        </div>
         <table>
           <thead>
             <tr>
