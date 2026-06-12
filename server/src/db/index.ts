@@ -66,6 +66,16 @@ export function initSchema(): void {
       value TEXT NOT NULL
     );
 
+    -- Application login accounts. Role gates the admin-only user management.
+    CREATE TABLE IF NOT EXISTS user (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'user',   -- 'user' | 'admin'
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS sync_log (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       started_at   TEXT NOT NULL,

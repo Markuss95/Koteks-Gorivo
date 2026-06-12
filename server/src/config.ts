@@ -60,4 +60,15 @@ export const config = {
   // Allowed browser origin for CORS. Empty = allow all (fine for local/dev).
   // In production set to the Netlify site URL, e.g. https://koteks-gorivo.netlify.app
   corsOrigin: optional('CORS_ORIGIN', ''),
+
+  auth: {
+    // Secret for signing JWTs. A dev fallback keeps local setup frictionless;
+    // production MUST set JWT_SECRET (warned at boot in index.ts).
+    jwtSecret: optional('JWT_SECRET', 'dev-insecure-secret-change-me'),
+    jwtSecretIsDefault: !process.env.JWT_SECRET,
+    tokenTtl: optional('JWT_TTL', '7d'),
+    // First admin, seeded on first boot when no users exist yet.
+    adminUsername: optional('ADMIN_USERNAME', ''),
+    adminPassword: optional('ADMIN_PASSWORD', ''),
+  },
 } as const;

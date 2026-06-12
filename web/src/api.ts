@@ -1,9 +1,12 @@
 import type {
+  AuthUser,
   ComparisonResult,
   HealthResponse,
   Machine,
   MachinePosition,
   MachineSeries,
+  ManagedUser,
+  Role,
   Settings,
 } from './types';
 
@@ -11,8 +14,32 @@ import type {
 // In production (Netlify) set VITE_API_BASE_URL to the Render backend URL.
 const BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 
-async function get<T>(url: string): Promise<T> {
-  const res = await fetch(`${BASE}${url}`);
+// ---- Token storage ----
+const TOKEN_KEY = 'kg_token';
+export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
+export const setToken = (t: string): void => localStorage.setItem(TOKEN_KEY, t);
+export const clearToken = (): void => localStorage.removeItem(TOKEN_KEY);
+
+// Called when a request comes back 401 (expired/invalid token) so the app can
+// drop back to the login screen.
+let onUnauthorized: (() => void) | null = null;
+export const setOnUnauthorized = (cb: () => void): void => {
+  onUnauthorized = cb;
+};
+
+function authHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers['Content-Type'] = 'application/json';
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+async function handle<T>(res: Response): Promise<T> {
+  if (res.status === 401) {
+    clearToken();
+    onUnauthorized?.();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error?.message ?? body.error ?? `Request failed (${res.status})`);
@@ -20,7 +47,46 @@ async function get<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+function get<T>(url: string): Promise<T> {
+  return fetch(`${BASE}${url}`, { headers: authHeaders() }).then((r) => handle<T>(r));
+}
+
+function send<T>(url: string, method: string, body?: unknown): Promise<T> {
+  return fetch(`${BASE}${url}`, {
+    method,
+    headers: authHeaders(body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  }).then((r) => handle<T>(r));
+}
+
 export const api = {
+  // ---- Auth ----
+  login: async (username: string, password: string): Promise<AuthUser> => {
+    const res = await fetch(`${BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `Prijava nije uspjela (${res.status})`);
+    }
+    const data = (await res.json()) as { token: string; user: AuthUser };
+    setToken(data.token);
+    return data.user;
+  },
+  me: () => get<{ user: AuthUser }>('/api/auth/me').then((r) => r.user),
+  logout: () => clearToken(),
+
+  // ---- Users (admin) ----
+  users: () => get<{ users: ManagedUser[] }>('/api/users').then((r) => r.users),
+  createUser: (input: { username: string; password: string; role: Role }) =>
+    send<{ user: ManagedUser }>('/api/users', 'POST', input).then((r) => r.user),
+  updateUser: (id: number, patch: { username?: string; password?: string; role?: Role }) =>
+    send<{ user: ManagedUser }>(`/api/users/${id}`, 'PUT', patch).then((r) => r.user),
+  deleteUser: (id: number) => send<{ ok: boolean }>(`/api/users/${id}`, 'DELETE'),
+
+  // ---- App data ----
   health: () => get<HealthResponse>('/api/health'),
   machines: () => get<{ machines: Machine[] }>('/api/machines').then((r) => r.machines),
   machinePositions: (date: string) =>
@@ -32,17 +98,7 @@ export const api = {
   machineSeries: (serial: string, from: string, to: string) =>
     get<MachineSeries>(`/api/machines/${encodeURIComponent(serial)}/series?from=${from}&to=${to}`),
   settings: () => get<Settings>('/api/settings'),
-  updateSettings: async (fuelArticleCodes: string[]): Promise<Settings> => {
-    const res = await fetch(`${BASE}/api/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fuelArticleCodes }),
-    });
-    if (!res.ok) throw new Error(`Update failed (${res.status})`);
-    return res.json();
-  },
-  triggerSync: async (): Promise<void> => {
-    const res = await fetch(`${BASE}/api/sync`, { method: 'POST' });
-    if (!res.ok && res.status !== 202) throw new Error(`Sync failed (${res.status})`);
-  },
+  updateSettings: (fuelArticleCodes: string[]) =>
+    send<Settings>('/api/settings', 'PUT', { fuelArticleCodes }),
+  triggerSync: () => send<{ started: boolean }>('/api/sync', 'POST'),
 };

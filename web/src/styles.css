@@ -54,10 +54,28 @@ nav.tabs button {
 nav.tabs button:hover { background: var(--panel-2); color: var(--text); }
 nav.tabs button.active { background: var(--panel-2); color: var(--text); }
 
-.health { margin-left: auto; display: flex; gap: 14px; align-items: center; font-size: 12px; }
+.health { margin-left: auto; display: flex; gap: 14px; align-items: center; font-size: 12px; flex-wrap: wrap; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.ok { background: var(--good); }
 .dot.bad { background: var(--bad); }
+
+.user-box { display: flex; align-items: center; gap: 10px; padding-left: 14px; border-left: 1px solid var(--border); }
+.logout-btn { padding: 5px 10px; font-size: 12px; }
+.neg-btn { border-color: var(--bad); color: var(--bad); }
+.neg-btn:hover:not(:disabled) { background: rgba(248,81,73,0.12); }
+
+/* ---- Login screen ---- */
+.login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 28px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 14px;
+}
+.login-brand { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+.login-brand span { color: var(--accent); }
+.login-card h1 { margin: 0; font-size: 20px; }
+.login-card .field span { font-size: 12px; color: var(--muted); }
+.login-card .field input { width: 100%; }
+.login-card .btn { margin-top: 4px; }
 
 main { padding: 24px; max-width: 1280px; width: 100%; margin: 0 auto; }
 

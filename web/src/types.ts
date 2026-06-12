@@ -15,6 +15,22 @@ export interface Machine {
   lastReadingTime: string | null;
 }
 
+export type Role = 'user' | 'admin';
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  role: Role;
+}
+
+export interface ManagedUser {
+  id: number;
+  username: string;
+  role: Role;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
 export interface MachinePosition {
   serialNumber: string;
   model: string;

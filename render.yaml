@@ -51,3 +51,12 @@ services:
       # Set to your Netlify site URL once known, e.g. https://koteks-gorivo.netlify.app
       - key: CORS_ORIGIN
         sync: false
+
+      # Auth — secret for signing login tokens (long random string) and the first
+      # admin, created on first boot when no users exist yet.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false

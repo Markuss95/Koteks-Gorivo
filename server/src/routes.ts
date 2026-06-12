@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { db, getJsonSetting, setJsonSetting } from './db/index.js';
 import { config } from './config.js';
@@ -8,8 +8,48 @@ import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
 import { lidatHealth } from './lidat/client.js';
 import { runLidatSync, isSyncing } from './sync/lidatSync.js';
+import { authenticate, signToken, requireAuth, type AuthedRequest } from './auth.js';
+import { listUsers, createUser, updateUser, deleteUser } from './services/users.js';
 
 export const api = Router();
+
+// ---- Auth ----
+// Login is public; everything registered after `api.use(requireAuth)` is gated.
+const loginSchema = z.object({ username: z.string().min(1), password: z.string().min(1) });
+
+api.post('/auth/login', (req, res) => {
+  const parse = loginSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Unesite korisničko ime i lozinku' });
+    return;
+  }
+  const user = authenticate(parse.data.username, parse.data.password);
+  if (!user) {
+    res.status(401).json({ error: 'Pogrešno korisničko ime ili lozinka' });
+    return;
+  }
+  res.json({ token: signToken(user), user });
+});
+
+// Public status root — Render's healthCheckPath (/api) hits this, so it must
+// stay reachable without a token. Maps to GET /api via the '/api' mount.
+api.get('/', (_req, res) => res.json({ name: 'Koteks Gorivo API', status: 'ok' }));
+
+// Gate everything below: a valid token is required.
+api.use(requireAuth);
+
+api.get('/auth/me', (req, res) => {
+  res.json({ user: (req as AuthedRequest).user });
+});
+
+// Admin-only guard (requireAuth above has already populated req.user).
+function adminOnly(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (req.user?.role !== 'admin') {
+    res.status(403).json({ error: 'Nemate ovlasti za ovu radnju' });
+    return;
+  }
+  next();
+}
 
 const dateSchema = z
   .string()
@@ -192,4 +232,75 @@ api.put('/settings', (req, res) => {
     syncCron: config.sync.cron,
     minDate: config.dataMinDate,
   });
+});
+
+// ---- Users (admin only) ----
+const roleSchema = z.enum(['user', 'admin']);
+const createUserSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(6, 'Lozinka mora imati barem 6 znakova'),
+  role: roleSchema,
+});
+const updateUserSchema = z.object({
+  username: z.string().min(1).optional(),
+  password: z.string().min(6, 'Lozinka mora imati barem 6 znakova').optional(),
+  role: roleSchema.optional(),
+});
+
+function parseUserId(req: { params: Record<string, string> }): number | null {
+  const id = Number(req.params.id);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+api.get('/users', adminOnly, (_req, res) => {
+  res.json({ users: listUsers() });
+});
+
+api.post('/users', adminOnly, (req, res) => {
+  const parse = createUserSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  try {
+    res.status(201).json({ user: createUser(parse.data) });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+api.put('/users/:id', adminOnly, (req, res) => {
+  const id = parseUserId(req);
+  if (id === null) {
+    res.status(400).json({ error: 'Neispravan ID' });
+    return;
+  }
+  const parse = updateUserSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  try {
+    res.json({ user: updateUser(id, parse.data) });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+api.delete('/users/:id', adminOnly, (req, res) => {
+  const id = parseUserId(req);
+  if (id === null) {
+    res.status(400).json({ error: 'Neispravan ID' });
+    return;
+  }
+  if ((req as AuthedRequest).user?.id === id) {
+    res.status(400).json({ error: 'Ne možete obrisati vlastiti račun' });
+    return;
+  }
+  try {
+    deleteUser(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });

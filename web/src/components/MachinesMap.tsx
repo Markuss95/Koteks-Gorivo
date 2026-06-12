@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { MachinePosition } from '../types';
-import { fmtDateTime, shortModel } from '../util';
+import { shortModel } from '../util';
 import { DateField } from './DateField';
 
 // Fallback view (Osijek area) when there are no positions to fit.
@@ -20,30 +20,26 @@ function pinIcon(label: string, selected: boolean): L.DivIcon {
   });
 }
 
-/** Focus the selected machine (pan + zoom + open popup), or fit all when none. */
+/** Focus the selected machine (pan + zoom), or fit all when none. */
 function MapController({
   points,
   focus,
-  markerRefs,
 }: {
   points: Array<[number, number]>;
   focus: { serial: string; pos: [number, number] } | null;
-  markerRefs: React.MutableRefObject<Record<string, L.Marker | null>>;
 }) {
   const map = useMap();
   useEffect(() => {
     if (focus) {
       map.setView(focus.pos, Math.max(map.getZoom(), 14), { animate: true });
-      markerRefs.current[focus.serial]?.openPopup();
       return;
     }
-    map.closePopup();
     if (points.length === 1) {
       map.setView(points[0], 13);
     } else if (points.length > 1) {
       map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
     }
-  }, [map, focus, points, markerRefs]);
+  }, [map, focus, points]);
   return null;
 }
 
@@ -70,15 +66,12 @@ export function MachinesMap({
     () => positions.map((p) => [p.latitude, p.longitude]),
     [positions],
   );
-  const markerRefs = useRef<Record<string, L.Marker | null>>({});
 
   const focus = useMemo(() => {
     if (!selected) return null;
     const p = positions.find((x) => x.serialNumber === selected);
     return p ? { serial: p.serialNumber, pos: [p.latitude, p.longitude] as [number, number] } : null;
   }, [selected, positions]);
-
-  const isToday = date === maxDate;
 
   return (
     <div className="panel">
@@ -125,36 +118,14 @@ export function MachinesMap({
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             />
-            <MapController points={points} focus={focus} markerRefs={markerRefs} />
+            <MapController points={points} focus={focus} />
             {positions.map((p) => (
               <Marker
                 key={p.serialNumber}
                 position={[p.latitude, p.longitude]}
                 icon={pinIcon(shortModel(p.model), p.serialNumber === selected)}
-                ref={(r) => {
-                  markerRefs.current[p.serialNumber] = r;
-                }}
                 eventHandlers={{ click: () => onSelect(p.serialNumber) }}
-              >
-                <Popup>
-                  <strong>{shortModel(p.model)}</strong>
-                  <br />
-                  Serijski broj: {p.serialNumber}
-                  {p.equipmentId && (
-                    <>
-                      <br />
-                      EquipmentID: {p.equipmentId}
-                    </>
-                  )}
-                  <br />
-                  {p.latitude.toFixed(5)}, {p.longitude.toFixed(5)}
-                  <br />
-                  <span className="muted">
-                    Pozicija: {fmtDateTime(p.readingTime)}
-                    {!isToday && p.day !== date ? ' (zadnje poznato)' : ''}
-                  </span>
-                </Popup>
-              </Marker>
+              />
             ))}
           </MapContainer>
         </div>

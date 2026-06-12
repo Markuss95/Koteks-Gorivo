@@ -5,18 +5,22 @@ import { config } from './config.js';
 import { initSchema, seedMachinesFromMapping } from './db/index.js';
 import { api } from './routes.js';
 import { runLidatSync } from './sync/lidatSync.js';
+import { seedAdmin } from './services/users.js';
 
 function bootstrap(): void {
   initSchema();
   const seed = seedMachinesFromMapping();
   console.log(`[db] machines seeded: ${seed.inserted} new of ${seed.total} in mapping`);
 
+  if (config.auth.jwtSecretIsDefault) {
+    console.warn('[auth] JWT_SECRET is not set — using an insecure dev default. Set JWT_SECRET in production.');
+  }
+  seedAdmin(config.auth.adminUsername, config.auth.adminPassword);
+
   const app = express();
   app.use(cors(config.corsOrigin ? { origin: config.corsOrigin } : undefined));
   app.use(express.json());
   app.use('/api', api);
-
-  app.get('/api', (_req, res) => res.json({ name: 'Koteks Gorivo API', status: 'ok' }));
 
   app.listen(config.port, () => {
     console.log(`[server] listening on http://localhost:${config.port}`);
