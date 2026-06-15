@@ -166,6 +166,9 @@ api.get('/machines/:serial/series', async (req, res) => {
       model: machine.model,
       equipmentId: machine.equipment_id,
       rnalogs,
+      latitude: machine.latitude ?? null,
+      longitude: machine.longitude ?? null,
+      locationTime: machine.location_time ?? null,
     },
     lidatReadings: readings.map((r) => ({
       time: r.reading_time,

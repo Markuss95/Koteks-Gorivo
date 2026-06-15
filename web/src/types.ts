@@ -96,7 +96,15 @@ export interface SyncLog {
 }
 
 export interface MachineSeries {
-  machine: { serialNumber: string; model: string; equipmentId: string | null; rnalogs: string[] };
+  machine: {
+    serialNumber: string;
+    model: string;
+    equipmentId: string | null;
+    rnalogs: string[];
+    latitude: number | null;
+    longitude: number | null;
+    locationTime: string | null;
+  };
   lidatReadings: Array<{ time: string; fuelConsumedCum: number; fuelUnits: string | null }>;
   marisItems: Array<{
     datum: string;

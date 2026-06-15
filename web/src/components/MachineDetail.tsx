@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -11,6 +12,7 @@ import {
 import { api } from '../api';
 import type { MachineSeries } from '../types';
 import { fmt, fmtDateTime, shortModel } from '../util';
+import { LocationMiniMap } from './LocationMiniMap';
 
 export function MachineDetail({
   serial,
@@ -36,12 +38,32 @@ export function MachineDetail({
       .finally(() => setLoading(false));
   }, [serial, from, to]);
 
-  const chartData =
-    data?.lidatReadings.map((r) => ({
-      t: new Date(r.time).getTime(),
-      label: fmtDateTime(r.time),
-      cum: r.fuelConsumedCum,
-    })) ?? [];
+  // Both series rebased to cumulative-since-period-start so they share a scale:
+  // LiDAT = consumed since the first reading, Maris = running sum of issuances.
+  const chartData = useMemo(() => {
+    if (!data) return [];
+    const lidat = data.lidatReadings;
+    const lidatBase = lidat.length ? lidat[0].fuelConsumedCum : 0;
+    const lidatByTime = new Map(
+      lidat.map((r) => [new Date(r.time).getTime(), r.fuelConsumedCum - lidatBase]),
+    );
+    const maris = data.marisItems
+      .map((m) => ({ t: new Date(m.datum).getTime(), litres: m.kolicina || 0 }))
+      .sort((a, b) => a.t - b.t);
+
+    const times = new Set<number>();
+    lidatByTime.forEach((_v, t) => times.add(t));
+    maris.forEach((m) => times.add(m.t));
+
+    return [...times]
+      .sort((a, b) => a - b)
+      .map((t) => ({
+        t,
+        lidat: lidatByTime.has(t) ? lidatByTime.get(t)! : null,
+        // Maris carries forward: cumulative issued up to and including t.
+        maris: maris.reduce((s, m) => (m.t <= t ? s + m.litres : s), 0),
+      }));
+  }, [data]);
 
   const marisTotal = data?.marisItems.reduce((s, i) => s + (i.kolicina || 0), 0) ?? 0;
 
@@ -77,9 +99,30 @@ export function MachineDetail({
             </div>
 
             <div className="panel">
-              <h2>LiDAT — kumulativno gorivo (L)</h2>
+              <div className="panel-head">
+                <h2>Zadnja poznata lokacija</h2>
+                <span className="muted" style={{ marginLeft: 'auto' }}>
+                  {data.machine.locationTime
+                    ? `Zabilježeno: ${fmtDateTime(data.machine.locationTime)}`
+                    : 'Vrijeme nepoznato'}
+                </span>
+              </div>
+              {data.machine.latitude != null && data.machine.longitude != null ? (
+                <>
+                  <LocationMiniMap lat={data.machine.latitude} lng={data.machine.longitude} />
+                  <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                    {data.machine.latitude.toFixed(5)}, {data.machine.longitude.toFixed(5)}
+                  </div>
+                </>
+              ) : (
+                <div className="muted">Nema GPS pozicije za ovaj stroj.</div>
+              )}
+            </div>
+
+            <div className="panel">
+              <h2>Kumulativno: izdano (Maris) vs potrošeno (LiDAT) (L)</h2>
               {chartData.length > 1 ? (
-                <ResponsiveContainer width="100%" height={240}>
+                <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={chartData} margin={{ left: 10, right: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#2b3742" />
                     <XAxis
@@ -91,19 +134,36 @@ export function MachineDetail({
                       stroke="#8b9bab"
                       tick={{ fontSize: 11 }}
                     />
-                    <YAxis stroke="#8b9bab" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+                    <YAxis stroke="#8b9bab" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
                     <Tooltip
                       contentStyle={{ background: '#182027', border: '1px solid #2b3742', color: '#e6edf3' }}
                       labelFormatter={(t) => fmtDateTime(new Date(t as number).toISOString())}
-                      formatter={(v: number) => [`${fmt(v, 1)} L`, 'Kumulativno']}
+                      formatter={(v: number, name) => [`${fmt(v, 1)} L`, name]}
                     />
-                    <Line type="monotone" dataKey="cum" stroke="#f5a623" dot={false} strokeWidth={2} />
+                    <Legend />
+                    <Line
+                      type="stepAfter"
+                      dataKey="maris"
+                      name="Maris (izdano)"
+                      stroke="#4aa3ff"
+                      dot={false}
+                      strokeWidth={2}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="lidat"
+                      name="LiDAT (potrošeno)"
+                      stroke="#f5a623"
+                      dot={false}
+                      strokeWidth={2}
+                      connectNulls
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
                 <div className="muted">
-                  Nedovoljno LiDAT očitanja u razdoblju za prikaz krivulje. Sinkronizacija prikuplja
-                  podatke s vremenom.
+                  Nedovoljno podataka u razdoblju za prikaz krivulje. Sinkronizacija prikuplja podatke
+                  s vremenom.
                 </div>
               )}
             </div>
