@@ -10,6 +10,9 @@ export interface Machine {
   latitude: number | null;
   longitude: number | null;
   locationTime: string | null;
+  operatingHours: number | null;
+  idleHours: number | null;
+  hoursTime: string | null;
   rnalogs: string[];
   lidatReadingCount: number;
   lastReadingTime: string | null;

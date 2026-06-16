@@ -95,6 +95,9 @@ export function initSchema(): void {
   if (!machineCols.has('latitude')) db.exec('ALTER TABLE machine ADD COLUMN latitude REAL');
   if (!machineCols.has('longitude')) db.exec('ALTER TABLE machine ADD COLUMN longitude REAL');
   if (!machineCols.has('location_time')) db.exec('ALTER TABLE machine ADD COLUMN location_time TEXT');
+  if (!machineCols.has('operating_hours')) db.exec('ALTER TABLE machine ADD COLUMN operating_hours REAL');
+  if (!machineCols.has('idle_hours')) db.exec('ALTER TABLE machine ADD COLUMN idle_hours REAL');
+  if (!machineCols.has('hours_time')) db.exec('ALTER TABLE machine ADD COLUMN hours_time TEXT');
 }
 
 // ---- Settings helpers ----

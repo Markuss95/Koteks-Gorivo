@@ -42,7 +42,10 @@ export async function runLidatSync(): Promise<{
        fuel_tank_capacity = COALESCE(@fuelTankCapacity, fuel_tank_capacity),
        latitude = COALESCE(@latitude, latitude),
        longitude = COALESCE(@longitude, longitude),
-       location_time = COALESCE(@locationTime, location_time)
+       location_time = COALESCE(@locationTime, location_time),
+       operating_hours = COALESCE(@operatingHours, operating_hours),
+       idle_hours = COALESCE(@idleHours, idle_hours),
+       hours_time = COALESCE(@hoursTime, hours_time)
      WHERE serial_number = @serialNumber`,
   );
 
@@ -124,6 +127,9 @@ export async function runLidatSync(): Promise<{
           latitude: eq.latitude ?? null,
           longitude: eq.longitude ?? null,
           locationTime: eq.locationTime ?? null,
+          operatingHours: eq.operatingHours ?? null,
+          idleHours: eq.idleHours ?? null,
+          hoursTime: eq.hoursTime ?? null,
         });
         if (eq.fuelConsumedCum !== undefined && eq.fuelDateTime) {
           const r = upsertReading.run({

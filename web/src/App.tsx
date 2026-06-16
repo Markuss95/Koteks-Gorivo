@@ -6,8 +6,9 @@ import { MachinesPage } from './pages/MachinesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { UsersPage } from './pages/UsersPage';
 import { LoginPage } from './pages/LoginPage';
+import { LerPage } from './pages/LerPage';
 
-type Tab = 'comparison' | 'machines' | 'settings' | 'users';
+type Tab = 'comparison' | 'ler' | 'machines' | 'settings' | 'users';
 
 export function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -73,7 +74,10 @@ export function App() {
         </div>
         <nav className="tabs">
           <button className={activeTab === 'comparison' ? 'active' : ''} onClick={() => setTab('comparison')}>
-            Usporedba
+            Usporedba Goriva
+          </button>
+          <button className={activeTab === 'ler' ? 'active' : ''} onClick={() => setTab('ler')}>
+            Ler
           </button>
           <button className={activeTab === 'machines' ? 'active' : ''} onClick={() => setTab('machines')}>
             Strojevi
@@ -113,6 +117,7 @@ export function App() {
 
       <main>
         {activeTab === 'comparison' && <ComparisonPage />}
+        {activeTab === 'ler' && <LerPage />}
         {activeTab === 'machines' && <MachinesPage health={health} onSyncDone={loadHealth} />}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'users' && isAdmin && <UsersPage currentUserId={user.id} />}

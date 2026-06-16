@@ -16,6 +16,10 @@ export interface LidatEquipment {
   longitude?: number;
   altitude?: number;
   locationTime?: string;
+  // Cumulative engine + idle hours (ISO 15143-3 Cumulative*OperatingHours)
+  operatingHours?: number;
+  idleHours?: number;
+  hoursTime?: string;
 }
 
 export interface LidatFuelReading {
@@ -139,6 +143,8 @@ export async function fetchFleetSnapshot(): Promise<LidatEquipment[]> {
       if (!header.serialNumber) continue;
       const fuelUsed = toArray(eq?.FuelUsed)[0];
       const fuelRemaining = toArray(eq?.FuelRemaining)[0];
+      const operating = toArray(eq?.CumulativeOperatingHours)[0];
+      const idle = toArray(eq?.CumulativeIdleNonOperatingHours)[0];
       out.push({
         ...header,
         fuelTankCapacity: fuelRemaining?.FuelTankCapacity
@@ -148,6 +154,10 @@ export async function fetchFleetSnapshot(): Promise<LidatEquipment[]> {
         fuelUnits: fuelUsed?.FuelUnits ? String(fuelUsed.FuelUnits) : undefined,
         // DateTime is a `datetime` attribute on the FuelUsed element.
         fuelDateTime: fuelUsed?.['@_datetime'] ? String(fuelUsed['@_datetime']) : undefined,
+        // Cumulative engine hours and the idle subset of them (both <Hour>).
+        operatingHours: operating?.Hour !== undefined ? Number(operating.Hour) : undefined,
+        idleHours: idle?.Hour !== undefined ? Number(idle.Hour) : undefined,
+        hoursTime: operating?.['@_datetime'] ? String(operating['@_datetime']) : undefined,
         ...parseLocation(eq),
       });
     }
