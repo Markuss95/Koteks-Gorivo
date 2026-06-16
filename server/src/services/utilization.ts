@@ -211,12 +211,15 @@ function hoursCumByDay(serial: string, metric: 'operating' | 'idle', fromIso: st
 function dailyDeltas(
   byDay: Array<{ day: string; cum: number }>,
   baseline: number | null,
-): Map<string, number> {
-  const out = new Map<string, number>();
+): Map<string, number | null> {
+  const out = new Map<string, number | null>();
   let prev = baseline;
   for (const row of byDay) {
-    // No baseline before the range → first day has no measurable delta (show 0).
-    out.set(row.day, prev === null ? 0 : Math.max(0, round2(row.cum - prev)));
+    // No baseline before the range → the first day's delta is UNMEASURABLE (the
+    // counter's first sample lands mid-day with nothing earlier to diff against).
+    // Show a gap (null), not 0, so it doesn't read as "no activity" — e.g. fuel
+    // may show real consumption that day while hours legitimately can't be sized.
+    out.set(row.day, prev === null ? null : Math.max(0, round2(row.cum - prev)));
     prev = row.cum;
   }
   return out;

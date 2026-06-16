@@ -5,7 +5,7 @@ import { today } from '../util';
 import { MachinesMap } from './MachinesMap';
 
 // Earliest date with reliable position history (matches the comparison floor).
-const MAP_DATE_FLOOR = '2026-06-01';
+const MAP_DATE_FLOOR = '2026-06-03';
 
 /**
  * Self-contained machine map: owns the date + positions fetching and (optionally)

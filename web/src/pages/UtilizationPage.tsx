@@ -19,7 +19,7 @@ type SortKey =
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
 // Hard floor for the date pickers: data before 1 June 2026 is unreliable.
-const DATA_FLOOR = '2026-06-01';
+const DATA_FLOOR = '2026-06-04';
 
 export function UtilizationPage() {
   const [from, setFrom] = useState(daysAgo(10));

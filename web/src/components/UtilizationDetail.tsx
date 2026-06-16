@@ -17,7 +17,7 @@ import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
 
 // Earliest date with reliable position history (matches the other maps).
-const MAP_DATE_FLOOR = '2026-06-01';
+const MAP_DATE_FLOOR = '2026-06-03';
 
 /** Modal: daily Radni sati / Sati u leru / Gorivo over the selected range. */
 export function UtilizationDetail({

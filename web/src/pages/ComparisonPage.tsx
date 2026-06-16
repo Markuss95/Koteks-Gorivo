@@ -27,7 +27,7 @@ type SortKey =
 const MIN_DATE_FALLBACK = '2026-05-27';
 // Hard floor for the date pickers: data before 1 June 2026 is unreliable
 // (incomplete early LiDAT history), so earlier dates are greyed out.
-const DATA_FLOOR = '2026-06-01';
+const DATA_FLOOR = '2026-06-03';
 
 export function ComparisonPage() {
   const [from, setFrom] = useState(daysAgo(10));
@@ -41,7 +41,6 @@ export function ComparisonPage() {
     dir: -1,
   });
   const [selected, setSelected] = useState<string | null>(null);
-  const [onlyWithData, setOnlyWithData] = useState(false);
 
   const run = () => {
     setLoading(true);
@@ -69,8 +68,7 @@ export function ComparisonPage() {
 
   const rows = useMemo(() => {
     if (!data) return [];
-    let r = [...data.machines];
-    if (onlyWithData) r = r.filter((m) => m.lidatConsumedLitres !== null || m.marisIssuedLitres > 0);
+    const r = [...data.machines];
     r.sort((a, b) => {
       const av = valueFor(a, sort.key);
       const bv = valueFor(b, sort.key);
@@ -80,7 +78,7 @@ export function ComparisonPage() {
       return ((av as number) - (bv as number)) * sort.dir;
     });
     return r;
-  }, [data, sort, onlyWithData]);
+  }, [data, sort]);
 
   const chartData = useMemo(
     () =>
@@ -131,14 +129,6 @@ export function ComparisonPage() {
         <button className="btn" onClick={run} disabled={loading}>
           {loading ? 'Učitavanje…' : 'Usporedi'}
         </button>
-        <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <input
-            type="checkbox"
-            checked={onlyWithData}
-            onChange={(e) => setOnlyWithData(e.target.checked)}
-          />
-          <span className="muted">Samo strojevi s podacima</span>
-        </label>
         <div style={{ marginLeft: 'auto' }} className="muted">
           {data && `Eurodizel (artikli): ${data.fuelArticleCodes.join(', ')}`}
         </div>
