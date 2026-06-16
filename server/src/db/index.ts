@@ -47,6 +47,23 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_lidat_reading_serial_time
       ON lidat_fuel_reading (serial_number, reading_time);
 
+    -- Cumulative engine/idle hours readings pulled from LiDAT (ISO 15143-3
+    -- CumulativeOperatingHours / CumulativeIdleNonOperatingHours). Cumulative
+    -- since manufacture; period hours = delta between two readings. The two
+    -- metrics arrive on their own timestamps, so each (serial, metric, time) is
+    -- a separate row. metric is 'operating' | 'idle'.
+    CREATE TABLE IF NOT EXISTS lidat_hours_reading (
+      serial_number TEXT NOT NULL,
+      metric        TEXT NOT NULL,            -- 'operating' | 'idle'
+      reading_time  TEXT NOT NULL,            -- ISO 8601 UTC
+      hours_cum     REAL NOT NULL,            -- cumulative hours
+      fetched_at    TEXT NOT NULL,
+      PRIMARY KEY (serial_number, metric, reading_time),
+      FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_lidat_hours_serial_metric_time
+      ON lidat_hours_reading (serial_number, metric, reading_time);
+
     -- One GPS position per machine per UTC day (ISO 15143-3 Locations), kept as
     -- the latest fix of that day. Backfilled by the sync; accumulates over time
     -- so any past day from the data floor onward can be mapped.

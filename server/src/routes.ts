@@ -4,6 +4,7 @@ import { db, getJsonSetting, setJsonSetting } from './db/index.js';
 import { config } from './config.js';
 import { listMachines, listMachinePositions } from './services/machines.js';
 import { buildComparison, getFuelArticleCodes } from './services/comparison.js';
+import { buildUtilization } from './services/utilization.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
 import { lidatHealth } from './lidat/client.js';
@@ -192,6 +193,16 @@ api.get('/comparison', async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// ---- Utilization (operating hours, fuel/h, movement within a range) ----
+api.get('/utilization', (req, res) => {
+  const parse = rangeSchema.safeParse(req.query);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  res.json(buildUtilization(parse.data.from, parse.data.to));
 });
 
 // ---- Sync ----

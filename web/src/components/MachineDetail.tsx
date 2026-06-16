@@ -10,9 +10,13 @@ import {
   YAxis,
 } from 'recharts';
 import { api } from '../api';
-import type { MachineSeries } from '../types';
-import { fmt, fmtDateTime, shortModel } from '../util';
+import type { MachinePosition, MachineSeries } from '../types';
+import { fmt, fmtDateTime, shortModel, today } from '../util';
+import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
+
+// Earliest date with reliable position history (matches the other maps).
+const MAP_DATE_FLOOR = '2026-06-01';
 
 export function MachineDetail({
   serial,
@@ -29,6 +33,12 @@ export function MachineDetail({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Map date is independent of the comparison range: defaults to today, user can
+  // step back to see where the machine was on any past day with a recorded fix.
+  const [mapDate, setMapDate] = useState(today());
+  const [pos, setPos] = useState<MachinePosition | null>(null);
+  const [posLoading, setPosLoading] = useState(true);
+
   useEffect(() => {
     setLoading(true);
     api
@@ -37,6 +47,15 @@ export function MachineDetail({
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [serial, from, to]);
+
+  useEffect(() => {
+    setPosLoading(true);
+    api
+      .machinePositions(mapDate)
+      .then((list) => setPos(list.find((p) => p.serialNumber === serial) ?? null))
+      .catch(() => setPos(null))
+      .finally(() => setPosLoading(false));
+  }, [serial, mapDate]);
 
   // Both series rebased to cumulative-since-period-start so they share a scale:
   // LiDAT = consumed since the first reading, Maris = running sum of issuances.
@@ -100,22 +119,27 @@ export function MachineDetail({
 
             <div className="panel">
               <div className="panel-head">
-                <h2>Zadnja poznata lokacija</h2>
-                <span className="muted" style={{ marginLeft: 'auto' }}>
-                  {data.machine.locationTime
-                    ? `Zabilježeno: ${fmtDateTime(data.machine.locationTime)}`
-                    : 'Vrijeme nepoznato'}
-                </span>
+                <h2>Lokacija stroja</h2>
+                <div className="field" style={{ marginLeft: 'auto' }}>
+                  <label>Datum</label>
+                  <DateField value={mapDate} min={MAP_DATE_FLOOR} max={today()} onChange={setMapDate} />
+                </div>
               </div>
-              {data.machine.latitude != null && data.machine.longitude != null ? (
+              {posLoading ? (
+                <div className="spinner">Učitavanje…</div>
+              ) : pos ? (
                 <>
-                  <LocationMiniMap lat={data.machine.latitude} lng={data.machine.longitude} />
+                  <LocationMiniMap lat={pos.latitude} lng={pos.longitude} />
                   <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                    {data.machine.latitude.toFixed(5)}, {data.machine.longitude.toFixed(5)}
+                    {pos.latitude.toFixed(5)}, {pos.longitude.toFixed(5)}
+                    {' · '}
+                    {pos.day === mapDate
+                      ? `zabilježeno ${fmtDateTime(pos.readingTime)}`
+                      : `zadnji zapis ${fmtDateTime(pos.readingTime)}`}
                   </div>
                 </>
               ) : (
-                <div className="muted">Nema GPS pozicije za ovaj stroj.</div>
+                <div className="muted">Nema GPS pozicije za odabrani datum.</div>
               )}
             </div>
 

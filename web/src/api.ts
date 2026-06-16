@@ -8,6 +8,7 @@ import type {
   ManagedUser,
   Role,
   Settings,
+  UtilizationResult,
 } from './types';
 
 // In dev this is empty → relative '/api' uses the Vite proxy.
@@ -95,6 +96,8 @@ export const api = {
     ).then((r) => r.positions),
   comparison: (from: string, to: string) =>
     get<ComparisonResult>(`/api/comparison?from=${from}&to=${to}`),
+  utilization: (from: string, to: string) =>
+    get<UtilizationResult>(`/api/utilization?from=${from}&to=${to}`),
   machineSeries: (serial: string, from: string, to: string) =>
     get<MachineSeries>(`/api/machines/${encodeURIComponent(serial)}/series?from=${from}&to=${to}`),
   settings: () => get<Settings>('/api/settings'),

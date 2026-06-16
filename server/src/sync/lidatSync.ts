@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import {
   fetchFleetSnapshot,
   fetchCumulativeFuelUsed,
+  fetchCumulativeHours,
   fetchLocationHistory,
   type LidatLocationReading,
 } from '../lidat/client.js';
@@ -55,6 +56,14 @@ export async function runLidatSync(): Promise<{
      ON CONFLICT(serial_number, reading_time) DO UPDATE SET
        fuel_consumed_cum = excluded.fuel_consumed_cum,
        fuel_units = excluded.fuel_units,
+       fetched_at = excluded.fetched_at`,
+  );
+
+  const upsertHourReading = db.prepare(
+    `INSERT INTO lidat_hours_reading (serial_number, metric, reading_time, hours_cum, fetched_at)
+     VALUES (@serial, @metric, @time, @cum, @fetchedAt)
+     ON CONFLICT(serial_number, metric, reading_time) DO UPDATE SET
+       hours_cum = excluded.hours_cum,
        fetched_at = excluded.fetched_at`,
   );
 
@@ -141,6 +150,18 @@ export async function runLidatSync(): Promise<{
           });
           readingsAdded += r.changes;
         }
+        // Current cumulative operating hours from the snapshot (extra point on top
+        // of the time-series backfill below). Idle has no usable history (no AEMP2
+        // time-series), so we only track operating for the utilization view.
+        if (eq.hoursTime && eq.operatingHours !== undefined) {
+          upsertHourReading.run({
+            serial: eq.serialNumber,
+            metric: 'operating',
+            time: eq.hoursTime,
+            cum: eq.operatingHours,
+            fetchedAt,
+          });
+        }
         // Current snapshot position → today's location row (so the map works
         // even before the per-machine history backfill below has run).
         if (eq.latitude !== undefined && eq.longitude !== undefined && eq.locationTime) {
@@ -196,6 +217,34 @@ export async function runLidatSync(): Promise<{
       } catch (err) {
         machinesFailed++;
         errors.push(`${m.serial_number}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Operating-hours time series (best-effort, own try/catch). LiDAT only
+      // serves a time series for CumulativeOperatingHours — there is NO idle
+      // time-series endpoint (it 404s), so idle history is built solely from the
+      // per-sync Fleet snapshot counter stored above. The Ler page diffs both.
+      try {
+        const operating = await fetchCumulativeHours(
+          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
+          'CumulativeOperatingHours',
+          startUtc,
+          endUtc,
+        );
+        const tx = db.transaction(() => {
+          for (const r of operating) {
+            const res = upsertHourReading.run({
+              serial: m.serial_number,
+              metric: 'operating',
+              time: r.dateTime,
+              cum: r.hours,
+              fetchedAt,
+            });
+            readingsAdded += res.changes;
+          }
+        });
+        tx();
+      } catch (err) {
+        errors.push(`${m.serial_number} (hours): ${err instanceof Error ? err.message : String(err)}`);
       }
 
       // Location history is best-effort: a Locations failure must not fail the

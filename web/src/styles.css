@@ -172,8 +172,9 @@ tbody tr.clickable { cursor: pointer; }
 /* ---- react-datepicker (Croatian, dark theme) ---- */
 .react-datepicker-wrapper { width: auto; }
 .date-input { width: 120px; }
-/* Sit above the Leaflet map panes (which go up to ~700). */
-.react-datepicker-popper { z-index: 1000; }
+/* Sit above the Leaflet map panes (~700) AND its zoom/attribution controls
+   (z-index 1000) — a tie let the +/- control bleed through the calendar. */
+.react-datepicker-popper { z-index: 2000; }
 .react-datepicker {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   font-family: inherit; font-size: 13px;

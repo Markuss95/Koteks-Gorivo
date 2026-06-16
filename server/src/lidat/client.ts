@@ -35,6 +35,11 @@ export interface LidatLocationReading {
   altitude?: number;
 }
 
+export interface LidatHourReading {
+  dateTime: string;
+  hours: number;
+}
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -243,6 +248,47 @@ export async function fetchLocationHistory(
         longitude: parsed.longitude,
         altitude: parsed.altitude,
       });
+    }
+    if (nodes.length < 100) break;
+    page++;
+  }
+
+  return out;
+}
+
+/**
+ * Cumulative hours time series for one machine over [start, end] for a given
+ * AEMP2 metric ('CumulativeOperatingHours' or 'CumulativeIdleNonOperatingHours').
+ * Same shape/limits as the fuel series: <Hour> values carry a `datetime` attribute.
+ * LiDAT serves at most 14 days in the past, so callers chunk longer ranges.
+ */
+export async function fetchCumulativeHours(
+  machine: { oemName: string; model: string; serialNumber: string },
+  metric: 'CumulativeOperatingHours' | 'CumulativeIdleNonOperatingHours',
+  startUtc: string,
+  endUtc: string,
+): Promise<LidatHourReading[]> {
+  const out: LidatHourReading[] = [];
+  let page = 1;
+  const maxPages = 100;
+  const make = encodeSegment(machine.oemName || 'Liebherr');
+  const model = encodeSegment(machine.model);
+  const serial = encodeSegment(machine.serialNumber);
+
+  while (page <= maxPages) {
+    const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/${metric}/${startUtc}/${endUtc}/${page}`;
+    const doc = await fetchXml(suffix);
+    // Time-data root varies by metric/version; accept the common roots and pull
+    // the per-metric children (each holds an <Hour> value + `datetime` attribute).
+    const root = doc?.[`${metric}Messages`] ?? doc?.Fleet ?? doc;
+    const nodes = toArray(root?.[metric]);
+
+    if (nodes.length === 0) break;
+    for (const n of nodes) {
+      const dt = n?.['@_datetime'];
+      const hour = n?.Hour;
+      if (dt === undefined || hour === undefined) continue;
+      out.push({ dateTime: String(dt), hours: Number(hour) });
     }
     if (nodes.length < 100) break;
     page++;

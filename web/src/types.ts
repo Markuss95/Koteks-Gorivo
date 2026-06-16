@@ -76,6 +76,33 @@ export interface ComparisonResult {
   };
 }
 
+export interface MachineUtilization {
+  serialNumber: string;
+  model: string;
+  equipmentId: string | null;
+  operatingHours: number | null;
+  reportingDays: number;
+  hoursPerDay: number | null;
+  fuelLitres: number | null;
+  litresPerHour: number | null;
+  partial: boolean;
+}
+
+export interface UtilizationResult {
+  from: string;
+  to: string;
+  generatedAt: string;
+  machines: MachineUtilization[];
+  totals: {
+    operatingHours: number;
+    fuelLitres: number;
+    avgHoursPerDay: number;
+    avgLitresPerHour: number;
+    machinesWithData: number;
+    machinesTotal: number;
+  };
+}
+
 export interface HealthResponse {
   maris: { ok: boolean; message: string };
   lidat: { ok: boolean; message: string };

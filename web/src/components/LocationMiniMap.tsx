@@ -15,6 +15,9 @@ export function LocationMiniMap({ lat, lng }: { lat: number; lng: number }) {
   return (
     <div className="map-wrap" style={{ height: 240 }}>
       <MapContainer
+        // center/zoom are init-only props — re-key on position so a date change
+        // remounts the map at the new coords instead of staying put.
+        key={`${lat},${lng}`}
         center={[lat, lng]}
         zoom={14}
         scrollWheelZoom
