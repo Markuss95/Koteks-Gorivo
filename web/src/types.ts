@@ -83,6 +83,8 @@ export interface MachineUtilization {
   operatingHours: number | null;
   reportingDays: number;
   hoursPerDay: number | null;
+  idleHours: number | null;
+  idlePct: number | null;
   fuelLitres: number | null;
   litresPerHour: number | null;
   partial: boolean;
@@ -95,8 +97,10 @@ export interface UtilizationResult {
   machines: MachineUtilization[];
   totals: {
     operatingHours: number;
+    idleHours: number;
     fuelLitres: number;
     avgHoursPerDay: number;
+    avgIdlePct: number;
     avgLitresPerHour: number;
     machinesWithData: number;
     machinesTotal: number;

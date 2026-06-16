@@ -10,6 +10,8 @@ type SortKey =
   | 'operatingHours'
   | 'hoursPerDay'
   | 'reportingDays'
+  | 'idleHours'
+  | 'idlePct'
   | 'fuelLitres'
   | 'litresPerHour';
 
@@ -74,6 +76,7 @@ export function UtilizationPage() {
 
   const avgHoursPerDay = data?.totals.avgHoursPerDay ?? 0;
   const totalOperating = data?.totals.operatingHours ?? 0;
+  const avgIdlePct = data?.totals.avgIdlePct ?? 0;
   const avgLitresPerHour = data?.totals.avgLitresPerHour ?? 0;
 
   const toggleSort = (key: SortKey) =>
@@ -115,6 +118,11 @@ export function UtilizationPage() {
           <div className="sub">za odabrano razdoblje</div>
         </div>
         <div className="card">
+          <div className="label">Prosječni udio lera</div>
+          <div className="value">{avgIdlePct.toFixed(1)}%</div>
+          <div className="sub">motor radi bez posla</div>
+        </div>
+        <div className="card">
           <div className="label">Prosječno L/h</div>
           <div className="value">{avgLitresPerHour.toFixed(1)} L/h</div>
           <div className="sub">gorivo po radnom satu</div>
@@ -125,7 +133,8 @@ export function UtilizationPage() {
         <h2>Iskorištenost po stroju</h2>
         <div className="muted" style={{ marginBottom: 12 }}>
           Radni sati = motor u radu (ukupno sati uključenog motora). Sati/dan pokazuje koliko se
-          stroj koristi po aktivnom danu. L/h = gorivo po radnom satu (veće = neučinkovitije).
+          stroj koristi po aktivnom danu. Ler = motor radi, ali stroj ne obavlja posao (visok udio
+          = gorivo se troši bez rada). L/h = gorivo po radnom satu (veće = neučinkovitije).
           Vrijednosti su za odabrano razdoblje.
         </div>
         {loading ? (
@@ -138,6 +147,8 @@ export function UtilizationPage() {
                 <Th label="Radni sati" num onClick={() => toggleSort('operatingHours')} active={sort.key === 'operatingHours'} dir={sort.dir} />
                 <Th label="Sati/dan" num onClick={() => toggleSort('hoursPerDay')} active={sort.key === 'hoursPerDay'} dir={sort.dir} />
                 <Th label="Aktivni dani" num onClick={() => toggleSort('reportingDays')} active={sort.key === 'reportingDays'} dir={sort.dir} />
+                <Th label="Sati u leru" num onClick={() => toggleSort('idleHours')} active={sort.key === 'idleHours'} dir={sort.dir} />
+                <Th label="Udio lera" num onClick={() => toggleSort('idlePct')} active={sort.key === 'idlePct'} dir={sort.dir} />
                 <Th label="Gorivo (L)" num onClick={() => toggleSort('fuelLitres')} active={sort.key === 'fuelLitres'} dir={sort.dir} />
                 <Th label="L/h" num onClick={() => toggleSort('litresPerHour')} active={sort.key === 'litresPerHour'} dir={sort.dir} />
               </tr>
@@ -161,13 +172,17 @@ export function UtilizationPage() {
                   <td className="num">{m.operatingHours == null ? '—' : fmt(m.operatingHours, 1)}</td>
                   <td className="num">{m.hoursPerDay == null ? '—' : fmt(m.hoursPerDay, 1)}</td>
                   <td className="num">{m.reportingDays || '—'}</td>
+                  <td className="num">{m.idleHours == null ? '—' : fmt(m.idleHours, 1)}</td>
+                  <td className={`num ${m.idlePct != null && m.idlePct >= 50 ? 'neg' : ''}`}>
+                    {m.idlePct == null ? '—' : `${m.idlePct.toFixed(1)}%`}
+                  </td>
                   <td className="num">{m.fuelLitres == null ? '—' : fmt(m.fuelLitres, 1)}</td>
                   <td className="num">{m.litresPerHour == null ? '—' : fmt(m.litresPerHour, 1)}</td>
                 </tr>
               ))}
               {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                  <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 30 }}>
                     Nema podataka o korištenju za odabrano razdoblje.
                   </td>
                 </tr>

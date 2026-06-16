@@ -257,16 +257,21 @@ export async function fetchLocationHistory(
 }
 
 /**
- * Cumulative hours time series for one machine over [start, end] for a given
- * AEMP2 metric ('CumulativeOperatingHours' or 'CumulativeIdleNonOperatingHours').
- * Same shape/limits as the fuel series: <Hour> values carry a `datetime` attribute.
- * LiDAT serves at most 14 days in the past, so callers chunk longer ranges.
+ * Cumulative hours time series for one machine over [start, end].
+ *
+ * `urlMetric` is the AEMP2 endpoint path segment; `elementName` is the XML
+ * element/root base name (defaults to urlMetric). They MATCH for operating
+ * hours, but the idle endpoint mismatches: URL `CumulativeNonProductiveIdleHours`
+ * (capital P) vs element `<CumulativeNonproductiveIdleHours>` (lower p), wrapped
+ * in `<CumulativeNonproductiveIdleHoursMessages>`. Each node holds an `<Hour>`
+ * value + a `datetime` attribute. LiDAT serves at most 14 days in the past.
  */
 export async function fetchCumulativeHours(
   machine: { oemName: string; model: string; serialNumber: string },
-  metric: 'CumulativeOperatingHours' | 'CumulativeIdleNonOperatingHours',
+  urlMetric: 'CumulativeOperatingHours' | 'CumulativeNonProductiveIdleHours',
   startUtc: string,
   endUtc: string,
+  elementName: string = urlMetric,
 ): Promise<LidatHourReading[]> {
   const out: LidatHourReading[] = [];
   let page = 1;
@@ -276,12 +281,11 @@ export async function fetchCumulativeHours(
   const serial = encodeSegment(machine.serialNumber);
 
   while (page <= maxPages) {
-    const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/${metric}/${startUtc}/${endUtc}/${page}`;
+    const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/${urlMetric}/${startUtc}/${endUtc}/${page}`;
     const doc = await fetchXml(suffix);
-    // Time-data root varies by metric/version; accept the common roots and pull
-    // the per-metric children (each holds an <Hour> value + `datetime` attribute).
-    const root = doc?.[`${metric}Messages`] ?? doc?.Fleet ?? doc;
-    const nodes = toArray(root?.[metric]);
+    // Pull the per-metric children (each holds an <Hour> value + `datetime` attr).
+    const root = doc?.[`${elementName}Messages`] ?? doc?.Fleet ?? doc;
+    const nodes = toArray(root?.[elementName]);
 
     if (nodes.length === 0) break;
     for (const n of nodes) {

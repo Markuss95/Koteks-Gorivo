@@ -219,22 +219,37 @@ export async function runLidatSync(): Promise<{
         errors.push(`${m.serial_number}: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      // Operating-hours time series (best-effort, own try/catch). LiDAT only
-      // serves a time series for CumulativeOperatingHours — there is NO idle
-      // time-series endpoint (it 404s), so idle history is built solely from the
-      // per-sync Fleet snapshot counter stored above. The Ler page diffs both.
+      // Operating + idle hours time series (best-effort, own try/catch). Both are
+      // real AEMP2 time-data endpoints: operating = CumulativeOperatingHours; idle
+      // = CumulativeNonProductiveIdleHours (URL capital P, element lower p). The
+      // utilization view diffs each counter over the selected range.
       try {
-        const operating = await fetchCumulativeHours(
-          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
-          'CumulativeOperatingHours',
-          startUtc,
-          endUtc,
-        );
+        const machineRef = { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number };
+        const [operating, idle] = await Promise.all([
+          fetchCumulativeHours(machineRef, 'CumulativeOperatingHours', startUtc, endUtc),
+          fetchCumulativeHours(
+            machineRef,
+            'CumulativeNonProductiveIdleHours',
+            startUtc,
+            endUtc,
+            'CumulativeNonproductiveIdleHours',
+          ),
+        ]);
         const tx = db.transaction(() => {
           for (const r of operating) {
             const res = upsertHourReading.run({
               serial: m.serial_number,
               metric: 'operating',
+              time: r.dateTime,
+              cum: r.hours,
+              fetchedAt,
+            });
+            readingsAdded += res.changes;
+          }
+          for (const r of idle) {
+            const res = upsertHourReading.run({
+              serial: m.serial_number,
+              metric: 'idle',
               time: r.dateTime,
               cum: r.hours,
               fetchedAt,
