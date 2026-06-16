@@ -176,3 +176,97 @@ export function buildUtilization(fromDate: string, toDate: string): UtilizationR
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+export interface UtilizationSeriesPoint {
+  day: string; // YYYY-MM-DD (UTC)
+  operatingHours: number | null;
+  idleHours: number | null;
+  fuelLitres: number | null;
+}
+
+/** Last cumulative value strictly before `beforeIso` for an hours metric. */
+function hoursCumBefore(serial: string, metric: 'operating' | 'idle', beforeIso: string): number | null {
+  const r = db
+    .prepare(
+      `SELECT hours_cum v FROM lidat_hours_reading
+       WHERE serial_number=? AND metric=? AND reading_time<?
+       ORDER BY reading_time DESC LIMIT 1`,
+    )
+    .get(serial, metric, beforeIso) as { v: number } | undefined;
+  return r ? r.v : null;
+}
+
+/** Per-day last cumulative value for an hours metric within [fromIso, toIso]. */
+function hoursCumByDay(serial: string, metric: 'operating' | 'idle', fromIso: string, toIso: string) {
+  return db
+    .prepare(
+      `SELECT substr(reading_time,1,10) day, MAX(hours_cum) cum FROM lidat_hours_reading
+       WHERE serial_number=? AND metric=? AND reading_time>=? AND reading_time<=?
+       GROUP BY day ORDER BY day`,
+    )
+    .all(serial, metric, fromIso, toIso) as Array<{ day: string; cum: number }>;
+}
+
+/** Turn a per-day cumulative list into per-day deltas, seeded by a pre-range baseline. */
+function dailyDeltas(
+  byDay: Array<{ day: string; cum: number }>,
+  baseline: number | null,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  let prev = baseline;
+  for (const row of byDay) {
+    // No baseline before the range → first day has no measurable delta (show 0).
+    out.set(row.day, prev === null ? 0 : Math.max(0, round2(row.cum - prev)));
+    prev = row.cum;
+  }
+  return out;
+}
+
+/**
+ * Daily operating-hours, idle-hours and fuel-litres for one machine over the
+ * range — each a per-day delta of its cumulative counter. Used by the modal chart.
+ */
+export function buildMachineSeries(
+  serial: string,
+  fromDate: string,
+  toDate: string,
+): { serial: string; from: string; to: string; points: UtilizationSeriesPoint[] } {
+  const fromIso = `${fromDate}T00:00:00Z`;
+  const toIso = `${toDate}T23:59:59Z`;
+
+  const opDaily = dailyDeltas(
+    hoursCumByDay(serial, 'operating', fromIso, toIso),
+    hoursCumBefore(serial, 'operating', fromIso),
+  );
+  const idleDaily = dailyDeltas(
+    hoursCumByDay(serial, 'idle', fromIso, toIso),
+    hoursCumBefore(serial, 'idle', fromIso),
+  );
+
+  const fuelByDay = db
+    .prepare(
+      `SELECT substr(reading_time,1,10) day, MAX(fuel_consumed_cum) cum FROM lidat_fuel_reading
+       WHERE serial_number=? AND reading_time>=? AND reading_time<=?
+       GROUP BY day ORDER BY day`,
+    )
+    .all(serial, fromIso, toIso) as Array<{ day: string; cum: number }>;
+  const fuelBaseline = (
+    db
+      .prepare(
+        `SELECT fuel_consumed_cum v FROM lidat_fuel_reading
+         WHERE serial_number=? AND reading_time<? ORDER BY reading_time DESC LIMIT 1`,
+      )
+      .get(serial, fromIso) as { v: number } | undefined
+  )?.v ?? null;
+  const fuelDaily = dailyDeltas(fuelByDay, fuelBaseline);
+
+  const days = [...new Set([...opDaily.keys(), ...idleDaily.keys(), ...fuelDaily.keys()])].sort();
+  const points: UtilizationSeriesPoint[] = days.map((day) => ({
+    day,
+    operatingHours: opDaily.has(day) ? opDaily.get(day)! : null,
+    idleHours: idleDaily.has(day) ? idleDaily.get(day)! : null,
+    fuelLitres: fuelDaily.has(day) ? fuelDaily.get(day)! : null,
+  }));
+
+  return { serial, from: fromDate, to: toDate, points };
+}

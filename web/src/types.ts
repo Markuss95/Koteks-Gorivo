@@ -107,6 +107,20 @@ export interface UtilizationResult {
   };
 }
 
+export interface UtilizationSeriesPoint {
+  day: string;
+  operatingHours: number | null;
+  idleHours: number | null;
+  fuelLitres: number | null;
+}
+
+export interface UtilizationSeries {
+  serial: string;
+  from: string;
+  to: string;
+  points: UtilizationSeriesPoint[];
+}
+
 export interface HealthResponse {
   maris: { ok: boolean; message: string };
   lidat: { ok: boolean; message: string };

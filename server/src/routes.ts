@@ -4,7 +4,7 @@ import { db, getJsonSetting, setJsonSetting } from './db/index.js';
 import { config } from './config.js';
 import { listMachines, listMachinePositions } from './services/machines.js';
 import { buildComparison, getFuelArticleCodes } from './services/comparison.js';
-import { buildUtilization } from './services/utilization.js';
+import { buildUtilization, buildMachineSeries } from './services/utilization.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
 import { lidatHealth } from './lidat/client.js';
@@ -203,6 +203,16 @@ api.get('/utilization', (req, res) => {
     return;
   }
   res.json(buildUtilization(parse.data.from, parse.data.to));
+});
+
+// Per-machine daily series (operating/idle hours + fuel) for the modal chart.
+api.get('/utilization/:serial/series', (req, res) => {
+  const parse = rangeSchema.safeParse(req.query);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  res.json(buildMachineSeries(req.params.serial, parse.data.from, parse.data.to));
 });
 
 // ---- Sync ----

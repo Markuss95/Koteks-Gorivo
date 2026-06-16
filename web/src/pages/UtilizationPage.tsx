@@ -4,6 +4,7 @@ import type { MachineUtilization, UtilizationResult } from '../types';
 import { daysAgo, fmt, shortModel, today } from '../util';
 import { DateField } from '../components/DateField';
 import { MachineMapPanel } from '../components/MachineMapPanel';
+import { UtilizationDetail } from '../components/UtilizationDetail';
 
 type SortKey =
   | 'model'
@@ -30,6 +31,8 @@ export function UtilizationPage() {
   // Default: most-worked machines first.
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'operatingHours', dir: -1 });
   const [selected, setSelected] = useState<string | null>(null);
+  // Machine whose daily-trend modal is open (null = closed).
+  const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
 
   const run = () => {
@@ -55,9 +58,10 @@ export function UtilizationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const focusMachine = (serial: string) => {
+  // Row click: open the daily-trend modal and highlight the machine on the map.
+  const openDetail = (serial: string, model: string) => {
     setSelected(serial);
-    mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setDetail({ serial, model });
   };
 
   const rows = useMemo<MachineUtilization[]>(() => {
@@ -158,8 +162,8 @@ export function UtilizationPage() {
                 <tr
                   key={m.serialNumber}
                   className={`clickable${m.serialNumber === selected ? ' selected-row' : ''}`}
-                  onClick={() => focusMachine(m.serialNumber)}
-                  title="Prikaži na karti"
+                  onClick={() => openDetail(m.serialNumber, m.model)}
+                  title="Prikaži graf po danima"
                 >
                   <td>
                     <strong>{shortModel(m.model)}</strong> <span className="muted">{m.serialNumber}</span>
@@ -191,6 +195,16 @@ export function UtilizationPage() {
           </table>
         )}
       </div>
+
+      {detail && (
+        <UtilizationDetail
+          serial={detail.serial}
+          model={detail.model}
+          from={from}
+          to={to}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </>
   );
 }
