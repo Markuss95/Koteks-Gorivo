@@ -137,9 +137,8 @@ export function UtilizationPage() {
         <h2>Iskorištenost po stroju</h2>
         <div className="muted" style={{ marginBottom: 12 }}>
           Radni sati = motor u radu (ukupno sati uključenog motora). Sati/dan pokazuje koliko se
-          stroj koristi po aktivnom danu. Ler = motor radi, ali stroj ne obavlja posao (visok udio
-          = gorivo se troši bez rada). L/h = gorivo po radnom satu (veće = neučinkovitije).
-          Vrijednosti su za odabrano razdoblje.
+          stroj koristi po aktivnom danu. Ler = motor radi, ali stroj ne obavlja posao. L/h = gorivo
+          po radnom satu. Vrijednosti su za odabrano razdoblje.
         </div>
         {loading ? (
           <div className="spinner">Učitavanje…</div>

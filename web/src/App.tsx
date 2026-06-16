@@ -70,17 +70,17 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          KOTEKS <span>GORIVO</span>
+          KOTEKS <span>STROJEVI</span>
         </div>
         <nav className="tabs">
           <button className={activeTab === 'comparison' ? 'active' : ''} onClick={() => setTab('comparison')}>
-            Usporedba Goriva
+            Lidat vs Maris
           </button>
           <button className={activeTab === 'utilization' ? 'active' : ''} onClick={() => setTab('utilization')}>
             Iskorištenost
           </button>
           <button className={activeTab === 'machines' ? 'active' : ''} onClick={() => setTab('machines')}>
-            Strojevi
+            Opće Informacije
           </button>
           <button className={activeTab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
             Postavke

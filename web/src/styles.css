@@ -37,7 +37,9 @@ header.topbar {
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  z-index: 10;
+  /* Above the Leaflet map panes/controls (~1000) so the sticky navbar stays on
+     top when scrolling; still below the modal overlay (3000). */
+  z-index: 1100;
 }
 .brand { font-weight: 700; letter-spacing: 0.3px; }
 .brand span { color: var(--accent); }
