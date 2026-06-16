@@ -118,7 +118,9 @@ export function App() {
       <main>
         {activeTab === 'comparison' && <ComparisonPage />}
         {activeTab === 'utilization' && <UtilizationPage />}
-        {activeTab === 'machines' && <MachinesPage health={health} onSyncDone={loadHealth} />}
+        {activeTab === 'machines' && (
+          <MachinesPage health={health} onSyncDone={loadHealth} isAdmin={isAdmin} />
+        )}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'users' && isAdmin && <UsersPage currentUserId={user.id} />}
       </main>

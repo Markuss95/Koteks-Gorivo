@@ -43,9 +43,6 @@ export function SettingsPage() {
 
       <div className="panel" style={{ maxWidth: 640 }}>
         <h2>Šifre artikala goriva</h2>
-        <p className="muted">
-          Maris stavke s ovim šiframa artikla broje se kao potrošnja goriva. Zadano: <code>06010001</code>.
-        </p>
         <div className="tags" style={{ margin: '12px 0' }}>
           {codes.map((c) => (
             <span className="tag" key={c}>

@@ -216,7 +216,7 @@ api.get('/utilization/:serial/series', (req, res) => {
 });
 
 // ---- Sync ----
-api.post('/sync', (_req, res) => {
+api.post('/sync', adminOnly, (_req, res) => {
   if (isSyncing()) {
     res.status(409).json({ error: 'Sync already running' });
     return;

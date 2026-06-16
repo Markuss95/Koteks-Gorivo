@@ -4,7 +4,7 @@ import type { HealthResponse, Machine } from '../types';
 import { fmtDateTime, shortModel } from '../util';
 import { MachineMapPanel } from '../components/MachineMapPanel';
 
-type SortKey = 'model' | 'serialNumber' | 'equipmentId' | 'lidatReadingCount' | 'lastReadingTime';
+type SortKey = 'model' | 'serialNumber' | 'lidatReadingCount' | 'lastReadingTime';
 
 function valueFor(m: Machine, key: SortKey): number | string | null {
   if (key === 'model') return `${shortModel(m.model)} ${m.serialNumber}`;
@@ -14,9 +14,11 @@ function valueFor(m: Machine, key: SortKey): number | string | null {
 export function MachinesPage({
   health,
   onSyncDone,
+  isAdmin,
 }: {
   health: HealthResponse | null;
   onSyncDone: () => void;
+  isAdmin: boolean;
 }) {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,9 +92,11 @@ export function MachinesPage({
   return (
     <>
       <div className="toolbar">
-        <button className="btn" onClick={sync} disabled={syncing || health?.sync.running}>
-          {syncing || health?.sync.running ? 'Sinkronizacija…' : 'Sinkroniziraj LiDAT'}
-        </button>
+        {isAdmin && (
+          <button className="btn" onClick={sync} disabled={syncing || health?.sync.running}>
+            {syncing || health?.sync.running ? 'Sinkronizacija…' : 'Sinkroniziraj LiDAT'}
+          </button>
+        )}
         <button className="btn secondary" onClick={load}>
           Osvježi
         </button>
@@ -130,8 +134,6 @@ export function MachinesPage({
               <tr>
                 <Th label="Model" onClick={() => toggleSort('model')} active={sort.key === 'model'} dir={sort.dir} />
                 <Th label="Serijski broj" onClick={() => toggleSort('serialNumber')} active={sort.key === 'serialNumber'} dir={sort.dir} />
-                <th>LiDAT model</th>
-                <Th label="EquipmentID" onClick={() => toggleSort('equipmentId')} active={sort.key === 'equipmentId'} dir={sort.dir} />
                 <th>Radni nalozi</th>
                 <Th label="Očitanja" num onClick={() => toggleSort('lidatReadingCount')} active={sort.key === 'lidatReadingCount'} dir={sort.dir} />
                 <Th label="Zadnje očitanje" onClick={() => toggleSort('lastReadingTime')} active={sort.key === 'lastReadingTime'} dir={sort.dir} />
@@ -149,10 +151,6 @@ export function MachinesPage({
                 >
                   <td><strong>{shortModel(m.model)}</strong></td>
                   <td>{m.serialNumber}</td>
-                  <td className="muted" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.makeCode ?? ''}>
-                    {m.oemName ? `${m.oemName} ${m.makeCode ?? ''}` : <span className="pill warn">nije povezan</span>}
-                  </td>
-                  <td className="muted">{m.equipmentId ?? '—'}</td>
                   <td className="muted">{m.rnalogs.join(', ')}</td>
                   <td className="num">{m.lidatReadingCount}</td>
                   <td className="muted">{fmtDateTime(m.lastReadingTime)}</td>

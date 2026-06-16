@@ -140,7 +140,7 @@ export function ComparisonPage() {
           <span className="muted">Samo strojevi s podacima</span>
         </label>
         <div style={{ marginLeft: 'auto' }} className="muted">
-          {data && `Gorivo (artikli): ${data.fuelArticleCodes.join(', ')}`}
+          {data && `Eurodizel (artikli): ${data.fuelArticleCodes.join(', ')}`}
         </div>
       </div>
 

@@ -43,7 +43,7 @@ export async function exportComparisonExcel(
   const header = [
     ['Koteks Gorivo — Usporedba potrošnje goriva'],
     [`Razdoblje: ${from} – ${to}`],
-    [`Gorivo (artikli): ${data.fuelArticleCodes.join(', ')}`],
+    [`Eurodizel (artikli): ${data.fuelArticleCodes.join(', ')}`],
     [`Generirano: ${new Date().toLocaleString('hr-HR')}`],
     [],
     [...COLUMNS],
@@ -161,7 +161,7 @@ export async function exportComparisonPdf(
     content: [
       { text: 'Koteks Gorivo — Usporedba potrošnje goriva', fontSize: 15, bold: true, margin: [0, 0, 0, 4] },
       {
-        text: `Razdoblje: ${from} – ${to}     ·     Gorivo (artikli): ${data.fuelArticleCodes.join(', ')}`,
+        text: `Razdoblje: ${from} – ${to}     ·     Eurodizel (artikli): ${data.fuelArticleCodes.join(', ')}`,
         color: '#555555',
         margin: [0, 0, 0, 2],
       },
