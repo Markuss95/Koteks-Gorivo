@@ -11,10 +11,11 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
-import { daysAgo, fmt, shortModel, today } from '../util';
+import { daysAgo, fmt, isStale, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
+import { StaleLegend } from '../components/StaleLegend';
 import { exportComparisonExcel, exportComparisonPdf } from '../export';
 
 type SortKey =
@@ -96,6 +97,28 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
     [rows],
   );
 
+  // Totals recomputed from the visible (group-filtered) rows so the cards and
+  // chart stay in sync with the selected groups.
+  const totals = useMemo(() => {
+    let marisIssuedLitres = 0;
+    let lidatConsumedLitres = 0;
+    let machinesWithLidatData = 0;
+    for (const m of rows) {
+      marisIssuedLitres += m.marisIssuedLitres;
+      if (m.lidatConsumedLitres !== null) {
+        lidatConsumedLitres += m.lidatConsumedLitres;
+        machinesWithLidatData += 1;
+      }
+    }
+    return {
+      marisIssuedLitres,
+      lidatConsumedLitres,
+      differenceLitres: marisIssuedLitres - lidatConsumedLitres,
+      machinesWithLidatData,
+      machinesTotal: rows.length,
+    };
+  }, [rows]);
+
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
 
@@ -145,32 +168,31 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
         <div className="cards">
           <div className="card">
             <div className="label">Maris — izdano</div>
-            <div className="value maris">{fmt(data.totals.marisIssuedLitres)} L</div>
+            <div className="value maris">{fmt(totals.marisIssuedLitres)} L</div>
             <div className="sub">iz skladišta (izdatnice)</div>
           </div>
           <div className="card">
             <div className="label">LiDAT — potrošeno</div>
-            <div className="value lidat">{fmt(data.totals.lidatConsumedLitres)} L</div>
+            <div className="value lidat">{fmt(totals.lidatConsumedLitres)} L</div>
             <div className="sub">
-              stvarna potrošnja · {data.totals.machinesWithLidatData}/{data.totals.machinesTotal} strojeva
+              stvarna potrošnja · {totals.machinesWithLidatData}/{totals.machinesTotal} strojeva
             </div>
           </div>
           <div className="card">
             <div className="label">Razlika</div>
             <div
-              className={`value ${data.totals.differenceLitres >= 0 ? 'pos' : 'neg'}`}
+              className={`value ${totals.differenceLitres > 0 ? 'neg' : 'pos'}`}
               style={{ color: undefined }}
             >
-              {data.totals.differenceLitres >= 0 ? '+' : ''}
-              {fmt(data.totals.differenceLitres)} L
+              {fmt(totals.differenceLitres)} L
             </div>
             <div className="sub">izdano − potrošeno</div>
           </div>
           <div className="card">
             <div className="label">Odstupanje</div>
             <div className="value">
-              {data.totals.lidatConsumedLitres > 0
-                ? `${((data.totals.differenceLitres / data.totals.lidatConsumedLitres) * 100).toFixed(1)}%`
+              {totals.lidatConsumedLitres > 0
+                ? `${((totals.differenceLitres / totals.lidatConsumedLitres) * 100).toFixed(1)}%`
                 : '—'}
             </div>
             <div className="sub">razlika / potrošeno</div>
@@ -227,6 +249,7 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
             </button>
           </div>
         </div>
+        <StaleLegend />
         <table>
           <thead>
             <tr>
@@ -240,7 +263,11 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
           </thead>
           <tbody>
             {rows.map((m) => (
-              <tr key={m.serialNumber} className="clickable" onClick={() => setSelected(m.serialNumber)}>
+              <tr
+                key={m.serialNumber}
+                className={`clickable${isStale(m.lastReadingTime) ? ' stale-row' : ''}`}
+                onClick={() => setSelected(m.serialNumber)}
+              >
                 <td>
                   <strong>{shortModel(m.model)}</strong> <span className="muted">{m.serialNumber}</span>
                   {m.lidatPartial && (
@@ -252,10 +279,10 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
                 <td className="muted">{m.rnalogs.join(', ') || '—'}</td>
                 <td className="num">{fmt(m.marisIssuedLitres, 1)}</td>
                 <td className="num">{m.lidatConsumedLitres === null ? '—' : fmt(m.lidatConsumedLitres, 1)}</td>
-                <td className={`num ${(m.differenceLitres ?? 0) >= 0 ? 'pos' : 'neg'}`}>
+                <td className={`num ${(m.differenceLitres ?? 0) > 0 ? 'neg' : 'pos'}`}>
                   {m.differenceLitres === null ? '—' : `${m.differenceLitres >= 0 ? '+' : ''}${fmt(m.differenceLitres, 1)}`}
                 </td>
-                <td className={`num ${(m.variancePct ?? 0) >= 0 ? 'pos' : 'neg'}`}>
+                <td className={`num ${(m.variancePct ?? 0) > 0 ? 'neg' : 'pos'}`}>
                   {m.variancePct === null ? '—' : `${m.variancePct >= 0 ? '+' : ''}${m.variancePct.toFixed(1)}%`}
                 </td>
               </tr>

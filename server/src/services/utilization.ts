@@ -6,6 +6,7 @@ export interface MachineUtilization {
   model: string;
   equipmentId: string | null;
   group: import('./groups.js').MachineGroup;
+  lastReadingTime: string | null;
   // Operating (engine-on) hours within the range = cumulative-counter delta.
   operatingHours: number | null;
   reportingDays: number; // distinct UTC days the machine sent an operating reading
@@ -136,6 +137,7 @@ export function buildUtilization(
       model: m.model,
       equipmentId: m.equipmentId,
       group: m.group,
+      lastReadingTime: m.lastReadingTime,
       operatingHours: operatingHours === null ? null : round2(operatingHours),
       reportingDays: days,
       hoursPerDay: hoursPerDay === null ? null : round2(hoursPerDay),

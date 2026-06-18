@@ -4,6 +4,7 @@ import type { HealthResponse, Machine, MachineGroup } from '../types';
 import { fmtDateTime, isStale, shortModel } from '../util';
 import { GroupFilter } from '../components/GroupFilter';
 import { MachineMapPanel } from '../components/MachineMapPanel';
+import { StaleLegend } from '../components/StaleLegend';
 
 type SortKey = 'model' | 'serialNumber' | 'lidatReadingCount' | 'lastReadingTime';
 
@@ -138,6 +139,7 @@ export function MachinesPage({
 
       <div className="panel">
         <h2>Strojevi ({machines.length})</h2>
+        <StaleLegend />
         {loading ? (
           <div className="spinner">Učitavanje…</div>
         ) : (

@@ -63,6 +63,7 @@ export interface MachineComparison {
   model: string;
   equipmentId: string | null;
   group: MachineGroup;
+  lastReadingTime: string | null;
   rnalogs: string[];
   marisIssuedLitres: number;
   marisIssueCount: number;
@@ -96,6 +97,7 @@ export interface MachineUtilization {
   model: string;
   equipmentId: string | null;
   group: MachineGroup;
+  lastReadingTime: string | null;
   operatingHours: number | null;
   reportingDays: number;
   hoursPerDay: number | null;

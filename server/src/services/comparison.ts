@@ -9,6 +9,7 @@ export interface MachineComparison {
   model: string;
   equipmentId: string | null;
   group: import('./groups.js').MachineGroup;
+  lastReadingTime: string | null;
   rnalogs: string[];
   // Maris (issued from warehouse)
   marisIssuedLitres: number;
@@ -205,6 +206,7 @@ export async function buildComparison(
       model: m.model,
       equipmentId: m.equipmentId,
       group: m.group,
+      lastReadingTime: m.lastReadingTime,
       rnalogs: m.rnalogs,
       marisIssuedLitres: round2(marisIssuedLitres),
       marisIssueCount,

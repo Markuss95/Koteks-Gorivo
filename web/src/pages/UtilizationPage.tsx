@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { MachineGroup, MachineUtilization, UtilizationResult } from '../types';
-import { daysAgo, fmt, shortModel, today } from '../util';
+import { daysAgo, fmt, isStale, shortModel, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
+import { StaleLegend } from '../components/StaleLegend';
 import { MachineMapPanel } from '../components/MachineMapPanel';
 import { UtilizationDetail } from '../components/UtilizationDetail';
 
@@ -82,10 +83,31 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
     return r;
   }, [data, sort, groups]);
 
-  const avgHoursPerDay = data?.totals.avgHoursPerDay ?? 0;
-  const totalOperating = data?.totals.operatingHours ?? 0;
-  const avgIdlePct = data?.totals.avgIdlePct ?? 0;
-  const avgLitresPerHour = data?.totals.avgLitresPerHour ?? 0;
+  // Card totals recomputed from the visible (group-filtered) rows so they stay
+  // in sync with the selected groups.
+  const cardTotals = useMemo(() => {
+    let operating = 0;
+    let fuel = 0;
+    const hpd: number[] = [];
+    const idlePct: number[] = [];
+    for (const m of rows) {
+      if (m.operatingHours != null) operating += m.operatingHours;
+      if (m.fuelLitres != null) fuel += m.fuelLitres;
+      if (m.hoursPerDay != null) hpd.push(m.hoursPerDay);
+      if (m.idlePct != null) idlePct.push(m.idlePct);
+    }
+    const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
+    return {
+      operating,
+      avgHoursPerDay: mean(hpd),
+      avgIdlePct: mean(idlePct),
+      avgLitresPerHour: operating > 0 ? fuel / operating : 0,
+    };
+  }, [rows]);
+  const avgHoursPerDay = cardTotals.avgHoursPerDay;
+  const totalOperating = cardTotals.operating;
+  const avgIdlePct = cardTotals.avgIdlePct;
+  const avgLitresPerHour = cardTotals.avgLitresPerHour;
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
@@ -147,6 +169,7 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
           stroj koristi po aktivnom danu. Ler = motor radi, ali stroj ne obavlja posao. L/h = gorivo
           po radnom satu. Vrijednosti su za odabrano razdoblje.
         </div>
+        <StaleLegend />
         {loading ? (
           <div className="spinner">Učitavanje…</div>
         ) : (
@@ -167,7 +190,7 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
               {rows.map((m) => (
                 <tr
                   key={m.serialNumber}
-                  className={`clickable${m.serialNumber === selected ? ' selected-row' : ''}`}
+                  className={`clickable${m.serialNumber === selected ? ' selected-row' : ''}${isStale(m.lastReadingTime) ? ' stale-row' : ''}`}
                   onClick={() => openDetail(m.serialNumber, m.model)}
                   title="Prikaži graf po danima"
                 >
