@@ -14,6 +14,7 @@ import { api } from '../api';
 import type { MachinePosition, UtilizationSeries } from '../types';
 import { fmt, fmtDateTime, shortModel, today } from '../util';
 import { DateField } from './DateField';
+import { LastSyncInfo } from './LastSyncInfo';
 import { LocationMiniMap } from './LocationMiniMap';
 
 // Earliest date with reliable position history (matches the other maps).
@@ -99,6 +100,8 @@ export function UtilizationDetail({
             ×
           </button>
         </div>
+
+        <LastSyncInfo />
 
         <div className="toolbar">
           <div className="field">

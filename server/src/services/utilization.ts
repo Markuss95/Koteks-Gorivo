@@ -5,6 +5,7 @@ export interface MachineUtilization {
   serialNumber: string;
   model: string;
   equipmentId: string | null;
+  group: import('./groups.js').MachineGroup;
   // Operating (engine-on) hours within the range = cumulative-counter delta.
   operatingHours: number | null;
   reportingDays: number; // distinct UTC days the machine sent an operating reading
@@ -105,10 +106,14 @@ function reportingDays(serial: string, fromIso: string, toIso: string): number {
   ).c;
 }
 
-export function buildUtilization(fromDate: string, toDate: string): UtilizationResult {
+export function buildUtilization(
+  fromDate: string,
+  toDate: string,
+  allowed?: import('./groups.js').MachineGroup[],
+): UtilizationResult {
   const fromIso = `${fromDate}T00:00:00Z`;
   const toIso = `${toDate}T23:59:59Z`;
-  const machines = listMachines();
+  const machines = listMachines(allowed);
 
   const result: MachineUtilization[] = machines.map((m) => {
     const op = hoursDelta(m.serialNumber, 'operating', fromIso, toIso);
@@ -130,6 +135,7 @@ export function buildUtilization(fromDate: string, toDate: string): UtilizationR
       serialNumber: m.serialNumber,
       model: m.model,
       equipmentId: m.equipmentId,
+      group: m.group,
       operatingHours: operatingHours === null ? null : round2(operatingHours),
       reportingDays: days,
       hoursPerDay: hoursPerDay === null ? null : round2(hoursPerDay),

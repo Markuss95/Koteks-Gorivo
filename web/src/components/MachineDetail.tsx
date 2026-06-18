@@ -13,6 +13,7 @@ import { api } from '../api';
 import type { MachinePosition, MachineSeries } from '../types';
 import { fmt, fmtDateTime, shortModel, today } from '../util';
 import { DateField } from './DateField';
+import { LastSyncInfo } from './LastSyncInfo';
 import { LocationMiniMap } from './LocationMiniMap';
 
 // Earliest date with reliable position history (matches the other maps).
@@ -98,6 +99,8 @@ export function MachineDetail({
             ×
           </button>
         </div>
+
+        <LastSyncInfo />
 
         {loading && <div className="spinner">Učitavanje…</div>}
         {error && <div className="error-box">{error}</div>}

@@ -166,6 +166,11 @@ tbody tr.clickable { cursor: pointer; }
 .tag { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .tag button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; }
 
+/* ---- Group filter (worksite checkboxes) ---- */
+.group-filter { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.group-filter__item { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--text); white-space: nowrap; }
+.group-filter__item input { cursor: pointer; }
+
 /* ---- Machines map (Leaflet) ---- */
 .map-head { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
 .map-head h2 { margin: 0; }

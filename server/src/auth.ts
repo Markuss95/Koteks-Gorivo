@@ -1,12 +1,20 @@
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import { config } from './config.js';
-import { getUserByUsername, getUserById, verifyPassword, type Role } from './services/users.js';
+import {
+  getUserByUsername,
+  getUserById,
+  verifyPassword,
+  userAllowedGroups,
+  type Role,
+} from './services/users.js';
+import type { MachineGroup } from './services/groups.js';
 
 export interface AuthPayload {
   id: number;
   username: string;
   role: Role;
+  allowedGroups: MachineGroup[];
 }
 
 export interface AuthedRequest extends Request {
@@ -28,7 +36,8 @@ export function signToken(payload: AuthPayload): string {
 export function authenticate(username: string, password: string): AuthPayload | null {
   const row = getUserByUsername(username.trim());
   if (!row || !verifyPassword(password, row.password_hash)) return null;
-  return { id: row.id, username: row.username, role: rowRole(row.role) };
+  const role = rowRole(row.role);
+  return { id: row.id, username: row.username, role, allowedGroups: userAllowedGroups(row.id, role) };
 }
 
 function bearerToken(req: Request): string | null {
@@ -50,7 +59,8 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
       res.status(401).json({ error: 'Korisnik ne postoji' });
       return;
     }
-    req.user = { id: row.id, username: row.username, role: rowRole(row.role) };
+    const role = rowRole(row.role);
+    req.user = { id: row.id, username: row.username, role, allowedGroups: userAllowedGroups(row.id, role) };
     next();
   } catch {
     res.status(401).json({ error: 'Sesija je istekla, prijavite se ponovno' });

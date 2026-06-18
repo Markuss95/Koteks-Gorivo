@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import type { MachineUtilization, UtilizationResult } from '../types';
+import type { MachineGroup, MachineUtilization, UtilizationResult } from '../types';
 import { daysAgo, fmt, shortModel, today } from '../util';
 import { DateField } from '../components/DateField';
+import { GroupFilter } from '../components/GroupFilter';
 import { MachineMapPanel } from '../components/MachineMapPanel';
 import { UtilizationDetail } from '../components/UtilizationDetail';
 
@@ -21,7 +22,7 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 // Hard floor for the date pickers: data before 1 June 2026 is unreliable.
 const DATA_FLOOR = '2026-06-04';
 
-export function UtilizationPage() {
+export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
   const [from, setFrom] = useState(daysAgo(10));
   const [to, setTo] = useState(today());
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
@@ -33,6 +34,7 @@ export function UtilizationPage() {
   const [selected, setSelected] = useState<string | null>(null);
   // Machine whose daily-trend modal is open (null = closed).
   const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
+  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
   const mapRef = useRef<HTMLDivElement>(null);
 
   const run = () => {
@@ -66,7 +68,9 @@ export function UtilizationPage() {
 
   const rows = useMemo<MachineUtilization[]>(() => {
     if (!data) return [];
-    const r = data.machines.filter((m) => m.operatingHours != null || m.fuelLitres != null);
+    const r = data.machines.filter(
+      (m) => (m.operatingHours != null || m.fuelLitres != null) && groups.has(m.group),
+    );
     r.sort((a, b) => {
       const av = valueFor(a, sort.key);
       const bv = valueFor(b, sort.key);
@@ -76,7 +80,7 @@ export function UtilizationPage() {
       return ((av as number) - (bv as number)) * sort.dir;
     });
     return r;
-  }, [data, sort]);
+  }, [data, sort, groups]);
 
   const avgHoursPerDay = data?.totals.avgHoursPerDay ?? 0;
   const totalOperating = data?.totals.operatingHours ?? 0;
@@ -102,12 +106,15 @@ export function UtilizationPage() {
         <button className="btn" onClick={run} disabled={loading}>
           {loading ? 'Učitavanje…' : 'Prikaži'}
         </button>
+        <div style={{ marginLeft: 'auto' }}>
+          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
+        </div>
       </div>
 
       {error && <div className="error-box">{error}</div>}
 
       <div ref={mapRef}>
-        <MachineMapPanel selected={selected} onSelect={setSelected} />
+        <MachineMapPanel selected={selected} onSelect={setSelected} groups={groups} />
       </div>
 
       <div className="cards">

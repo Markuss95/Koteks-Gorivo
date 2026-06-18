@@ -1,3 +1,13 @@
+export type MachineGroup = 'osijek' | 'velicki' | 'psunj';
+
+// Display order + Croatian labels for the worksite groups.
+export const GROUP_ORDER: MachineGroup[] = ['osijek', 'velicki', 'psunj'];
+export const GROUP_LABELS: Record<MachineGroup, string> = {
+  osijek: 'Osijek Koteks',
+  velicki: 'Velički Kamen',
+  psunj: 'Kamen Psunj',
+};
+
 export interface Machine {
   serialNumber: string;
   model: string;
@@ -14,6 +24,7 @@ export interface Machine {
   idleHours: number | null;
   hoursTime: string | null;
   rnalogs: string[];
+  group: MachineGroup;
   lidatReadingCount: number;
   lastReadingTime: string | null;
 }
@@ -24,12 +35,14 @@ export interface AuthUser {
   id: number;
   username: string;
   role: Role;
+  allowedGroups: MachineGroup[];
 }
 
 export interface ManagedUser {
   id: number;
   username: string;
   role: Role;
+  allowedGroups: MachineGroup[];
   createdAt: string;
   updatedAt: string | null;
 }
@@ -38,6 +51,7 @@ export interface MachinePosition {
   serialNumber: string;
   model: string;
   equipmentId: string | null;
+  group: MachineGroup;
   latitude: number;
   longitude: number;
   readingTime: string;
@@ -48,6 +62,7 @@ export interface MachineComparison {
   serialNumber: string;
   model: string;
   equipmentId: string | null;
+  group: MachineGroup;
   rnalogs: string[];
   marisIssuedLitres: number;
   marisIssueCount: number;
@@ -80,6 +95,7 @@ export interface MachineUtilization {
   serialNumber: string;
   model: string;
   equipmentId: string | null;
+  group: MachineGroup;
   operatingHours: number | null;
   reportingDays: number;
   hoursPerDay: number | null;

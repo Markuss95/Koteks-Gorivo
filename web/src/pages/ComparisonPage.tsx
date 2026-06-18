@@ -10,10 +10,11 @@ import {
   YAxis,
 } from 'recharts';
 import { api } from '../api';
-import type { ComparisonResult, MachineComparison } from '../types';
+import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
 import { daysAgo, fmt, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { DateField } from '../components/DateField';
+import { GroupFilter } from '../components/GroupFilter';
 import { exportComparisonExcel, exportComparisonPdf } from '../export';
 
 type SortKey =
@@ -29,7 +30,7 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 // (incomplete early LiDAT history), so earlier dates are greyed out.
 const DATA_FLOOR = '2026-06-04';
 
-export function ComparisonPage() {
+export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
   const [from, setFrom] = useState(daysAgo(10));
   const [to, setTo] = useState(today());
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
@@ -41,6 +42,7 @@ export function ComparisonPage() {
     dir: -1,
   });
   const [selected, setSelected] = useState<string | null>(null);
+  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
 
   const run = () => {
     setLoading(true);
@@ -68,7 +70,7 @@ export function ComparisonPage() {
 
   const rows = useMemo(() => {
     if (!data) return [];
-    const r = [...data.machines];
+    const r = data.machines.filter((m) => groups.has(m.group));
     r.sort((a, b) => {
       const av = valueFor(a, sort.key);
       const bv = valueFor(b, sort.key);
@@ -78,7 +80,7 @@ export function ComparisonPage() {
       return ((av as number) - (bv as number)) * sort.dir;
     });
     return r;
-  }, [data, sort]);
+  }, [data, sort, groups]);
 
   const chartData = useMemo(
     () =>
@@ -129,7 +131,10 @@ export function ComparisonPage() {
         <button className="btn" onClick={run} disabled={loading}>
           {loading ? 'Učitavanje…' : 'Usporedi'}
         </button>
-        <div style={{ marginLeft: 'auto' }} className="muted">
+        <div style={{ marginLeft: 'auto' }}>
+          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
+        </div>
+        <div className="muted">
           {data && `Eurodizel (artikli): ${data.fuelArticleCodes.join(', ')}`}
         </div>
       </div>

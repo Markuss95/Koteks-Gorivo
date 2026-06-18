@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import type { HealthResponse, Machine } from '../types';
+import type { HealthResponse, Machine, MachineGroup } from '../types';
 import { fmtDateTime, shortModel } from '../util';
+import { GroupFilter } from '../components/GroupFilter';
 import { MachineMapPanel } from '../components/MachineMapPanel';
 
 type SortKey = 'model' | 'serialNumber' | 'lidatReadingCount' | 'lastReadingTime';
@@ -15,10 +16,12 @@ export function MachinesPage({
   health,
   onSyncDone,
   isAdmin,
+  allowedGroups,
 }: {
   health: HealthResponse | null;
   onSyncDone: () => void;
   isAdmin: boolean;
+  allowedGroups: MachineGroup[];
 }) {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +31,7 @@ export function MachinesPage({
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'lastReadingTime', dir: -1 });
   // Selected machine to focus on the map (null = show all).
   const [selected, setSelected] = useState<string | null>(null);
+  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
   const mapRef = useRef<HTMLDivElement>(null);
   // Bumped after a sync to make the map re-fetch positions.
   const [mapReload, setMapReload] = useState(0);
@@ -39,7 +43,7 @@ export function MachinesPage({
   };
 
   const sorted = useMemo(() => {
-    const r = [...machines];
+    const r = machines.filter((m) => groups.has(m.group));
     r.sort((a, b) => {
       const av = valueFor(a, sort.key);
       const bv = valueFor(b, sort.key);
@@ -49,7 +53,7 @@ export function MachinesPage({
       return ((av as number) - (bv as number)) * sort.dir;
     });
     return r;
-  }, [machines, sort]);
+  }, [machines, sort, groups]);
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
@@ -100,12 +104,20 @@ export function MachinesPage({
         <button className="btn secondary" onClick={load}>
           Osvježi
         </button>
+        <div style={{ marginLeft: 'auto' }}>
+          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
+        </div>
       </div>
 
       {error && <div className="error-box">{error}</div>}
 
       <div ref={mapRef}>
-        <MachineMapPanel selected={selected} onSelect={setSelected} reloadSignal={mapReload} />
+        <MachineMapPanel
+          selected={selected}
+          onSelect={setSelected}
+          reloadSignal={mapReload}
+          groups={groups}
+        />
       </div>
 
       {last && (

@@ -8,6 +8,7 @@ export interface MachineComparison {
   serialNumber: string;
   model: string;
   equipmentId: string | null;
+  group: import('./groups.js').MachineGroup;
   rnalogs: string[];
   // Maris (issued from warehouse)
   marisIssuedLitres: number;
@@ -165,12 +166,16 @@ async function marisFuelByRnalog(
   return byRnalog;
 }
 
-export async function buildComparison(fromDate: string, toDate: string): Promise<ComparisonResult> {
+export async function buildComparison(
+  fromDate: string,
+  toDate: string,
+  allowed?: import('./groups.js').MachineGroup[],
+): Promise<ComparisonResult> {
   const fuelCodes = getFuelArticleCodes();
   const fromIso = `${fromDate}T00:00:00Z`;
   const toIso = `${toDate}T23:59:59Z`;
 
-  const machines = listMachines();
+  const machines = listMachines(allowed);
   const marisByRnalog = await marisFuelByRnalog(fromDate, toDate, fuelCodes);
 
   const result: MachineComparison[] = machines.map((m) => {
@@ -199,6 +204,7 @@ export async function buildComparison(fromDate: string, toDate: string): Promise
       serialNumber: m.serialNumber,
       model: m.model,
       equipmentId: m.equipmentId,
+      group: m.group,
       rnalogs: m.rnalogs,
       marisIssuedLitres: round2(marisIssuedLitres),
       marisIssueCount,

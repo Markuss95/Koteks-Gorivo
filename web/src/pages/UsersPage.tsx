@@ -1,18 +1,26 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import type { ManagedUser, Role } from '../types';
+import type { MachineGroup, ManagedUser, Role } from '../types';
+import { GROUP_ORDER } from '../types';
 import { fmtDateTime } from '../util';
+import { GroupFilter } from '../components/GroupFilter';
 
 export function UsersPage({ currentUserId }: { currentUserId: number }) {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // New-user form.
-  const [nu, setNu] = useState<{ username: string; password: string; role: Role }>({
+  // New-user form. New users see all groups by default.
+  const [nu, setNu] = useState<{
+    username: string;
+    password: string;
+    role: Role;
+    allowedGroups: MachineGroup[];
+  }>({
     username: '',
     password: '',
     role: 'user',
+    allowedGroups: [...GROUP_ORDER],
   });
   const [creating, setCreating] = useState(false);
 
@@ -35,8 +43,13 @@ export function UsersPage({ currentUserId }: { currentUserId: number }) {
     setCreating(true);
     setError(null);
     try {
-      await api.createUser({ username: nu.username.trim(), password: nu.password, role: nu.role });
-      setNu({ username: '', password: '', role: 'user' });
+      await api.createUser({
+        username: nu.username.trim(),
+        password: nu.password,
+        role: nu.role,
+        allowedGroups: nu.allowedGroups,
+      });
+      setNu({ username: '', password: '', role: 'user', allowedGroups: [...GROUP_ORDER] });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -49,6 +62,16 @@ export function UsersPage({ currentUserId }: { currentUserId: number }) {
     setError(null);
     try {
       await api.updateUser(u.id, { role });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const setUserGroups = async (u: ManagedUser, groups: MachineGroup[]) => {
+    setError(null);
+    try {
+      await api.updateUser(u.id, { allowedGroups: groups });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -109,6 +132,13 @@ export function UsersPage({ currentUserId }: { currentUserId: number }) {
               <option value="admin">Administrator</option>
             </select>
           </div>
+          <div className="field">
+            <label>Grupe (vidljive)</label>
+            <GroupFilter
+              value={new Set(nu.allowedGroups)}
+              onChange={(next) => setNu({ ...nu, allowedGroups: [...next] })}
+            />
+          </div>
           <button
             className="btn"
             type="submit"
@@ -129,6 +159,7 @@ export function UsersPage({ currentUserId }: { currentUserId: number }) {
               <tr>
                 <th>Korisničko ime</th>
                 <th>Uloga</th>
+                <th>Grupe</th>
                 <th>Kreiran</th>
                 <th>Radnje</th>
               </tr>
@@ -150,6 +181,16 @@ export function UsersPage({ currentUserId }: { currentUserId: number }) {
                       <option value="user">Korisnik</option>
                       <option value="admin">Administrator</option>
                     </select>
+                  </td>
+                  <td>
+                    {u.role === 'admin' ? (
+                      <span className="muted">Sve (administrator)</span>
+                    ) : (
+                      <GroupFilter
+                        value={new Set(u.allowedGroups)}
+                        onChange={(next) => setUserGroups(u, [...next])}
+                      />
+                    )}
                   </td>
                   <td className="muted">{fmtDateTime(u.createdAt)}</td>
                   <td>

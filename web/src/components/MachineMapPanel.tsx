@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import type { MachinePosition } from '../types';
+import type { MachineGroup, MachinePosition } from '../types';
 import { today } from '../util';
 import { MachinesMap } from './MachinesMap';
 
@@ -19,10 +19,13 @@ export function MachineMapPanel({
   selected,
   onSelect,
   reloadSignal,
+  groups,
 }: {
   selected?: string | null;
   onSelect?: (serial: string | null) => void;
   reloadSignal?: number;
+  // When set, only positions in these groups are plotted (undefined = all).
+  groups?: Set<MachineGroup>;
 }) {
   const [mapDate, setMapDate] = useState(today());
   const [positions, setPositions] = useState<MachinePosition[]>([]);
@@ -42,11 +45,16 @@ export function MachineMapPanel({
       .finally(() => setLoading(false));
   }, [mapDate, reloadSignal]);
 
+  const shown = useMemo(
+    () => (groups ? positions.filter((p) => groups.has(p.group)) : positions),
+    [positions, groups],
+  );
+
   return (
     <>
       {error && <div className="error-box">{error}</div>}
       <MachinesMap
-        positions={positions}
+        positions={shown}
         selected={sel}
         onSelect={setSel}
         date={mapDate}

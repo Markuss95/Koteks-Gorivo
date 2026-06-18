@@ -116,10 +116,15 @@ export function App() {
       </header>
 
       <main>
-        {activeTab === 'comparison' && <ComparisonPage />}
-        {activeTab === 'utilization' && <UtilizationPage />}
+        {activeTab === 'comparison' && <ComparisonPage allowedGroups={user.allowedGroups} />}
+        {activeTab === 'utilization' && <UtilizationPage allowedGroups={user.allowedGroups} />}
         {activeTab === 'machines' && (
-          <MachinesPage health={health} onSyncDone={loadHealth} isAdmin={isAdmin} />
+          <MachinesPage
+            health={health}
+            onSyncDone={loadHealth}
+            isAdmin={isAdmin}
+            allowedGroups={user.allowedGroups}
+          />
         )}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'users' && isAdmin && <UsersPage currentUserId={user.id} />}

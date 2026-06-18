@@ -2,7 +2,7 @@ import { Router, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { db, getJsonSetting, setJsonSetting } from './db/index.js';
 import { config } from './config.js';
-import { listMachines, listMachinePositions } from './services/machines.js';
+import { listMachines, listMachinePositions, machineGroupsMap } from './services/machines.js';
 import { buildComparison, getFuelArticleCodes } from './services/comparison.js';
 import { buildUtilization, buildMachineSeries } from './services/utilization.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
@@ -83,9 +83,22 @@ api.get('/health', async (_req, res) => {
   });
 });
 
+// Groups the requesting user may see (admins already carry all three).
+function reqGroups(req: AuthedRequest) {
+  return req.user?.allowedGroups;
+}
+
+// Whether the requesting user is allowed to see a specific machine (by group).
+function canAccessSerial(req: AuthedRequest, serial: string): boolean {
+  const allowed = reqGroups(req);
+  if (!allowed) return true;
+  const group = machineGroupsMap().get(serial) ?? 'osijek';
+  return allowed.includes(group);
+}
+
 // ---- Machines ----
-api.get('/machines', (_req, res) => {
-  res.json({ machines: listMachines() });
+api.get('/machines', (req, res) => {
+  res.json({ machines: listMachines(reqGroups(req as AuthedRequest)) });
 });
 
 // Machine GPS positions as of a given date (defaults to today). Each machine's
@@ -96,7 +109,7 @@ api.get('/machines/positions', (req, res) => {
     res.status(400).json({ error: 'Expected date=YYYY-MM-DD' });
     return;
   }
-  res.json({ date, positions: listMachinePositions(date) });
+  res.json({ date, positions: listMachinePositions(date, reqGroups(req as AuthedRequest)) });
 });
 
 // Per-machine detail: LiDAT cumulative series + Maris issuances in range.
@@ -108,6 +121,11 @@ api.get('/machines/:serial/series', async (req, res) => {
   }
   const { from, to } = parse.data;
   const serial = req.params.serial;
+
+  if (!canAccessSerial(req as AuthedRequest, serial)) {
+    res.status(404).json({ error: 'Machine not found' });
+    return;
+  }
 
   const machine = db
     .prepare('SELECT * FROM machine WHERE serial_number = ?')
@@ -188,7 +206,11 @@ api.get('/comparison', async (req, res) => {
     return;
   }
   try {
-    const result = await buildComparison(parse.data.from, parse.data.to);
+    const result = await buildComparison(
+      parse.data.from,
+      parse.data.to,
+      reqGroups(req as AuthedRequest),
+    );
     res.json(result);
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
@@ -202,7 +224,7 @@ api.get('/utilization', (req, res) => {
     res.status(400).json({ error: parse.error.flatten() });
     return;
   }
-  res.json(buildUtilization(parse.data.from, parse.data.to));
+  res.json(buildUtilization(parse.data.from, parse.data.to, reqGroups(req as AuthedRequest)));
 });
 
 // Per-machine daily series (operating/idle hours + fuel) for the modal chart.
@@ -210,6 +232,10 @@ api.get('/utilization/:serial/series', (req, res) => {
   const parse = rangeSchema.safeParse(req.query);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  if (!canAccessSerial(req as AuthedRequest, req.params.serial)) {
+    res.status(404).json({ error: 'Machine not found' });
     return;
   }
   res.json(buildMachineSeries(req.params.serial, parse.data.from, parse.data.to));
@@ -260,15 +286,18 @@ api.put('/settings', (req, res) => {
 
 // ---- Users (admin only) ----
 const roleSchema = z.enum(['user', 'admin']);
+const groupsSchema = z.array(z.enum(['osijek', 'velicki', 'psunj'])).optional();
 const createUserSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(6, 'Lozinka mora imati barem 6 znakova'),
   role: roleSchema,
+  allowedGroups: groupsSchema,
 });
 const updateUserSchema = z.object({
   username: z.string().min(1).optional(),
   password: z.string().min(6, 'Lozinka mora imati barem 6 znakova').optional(),
   role: roleSchema.optional(),
+  allowedGroups: groupsSchema,
 });
 
 function parseUserId(req: { params: Record<string, string> }): number | null {

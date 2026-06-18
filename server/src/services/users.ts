@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { db } from '../db/index.js';
+import { GROUP_KEYS, type MachineGroup } from './groups.js';
 
 export type Role = 'user' | 'admin';
 
@@ -10,14 +11,41 @@ interface UserRow {
   role: string;
   created_at: string;
   updated_at: string | null;
+  allowed_groups: string | null;
 }
 
 export interface PublicUser {
   id: number;
   username: string;
   role: Role;
+  allowedGroups: MachineGroup[];
   createdAt: string;
   updatedAt: string | null;
+}
+
+/** Parse the stored allowed_groups JSON; NULL/invalid → all groups. */
+export function parseAllowedGroups(raw: string | null): MachineGroup[] {
+  if (!raw) return [...GROUP_KEYS];
+  try {
+    const arr = JSON.parse(raw);
+    const valid = Array.isArray(arr) ? arr.filter((g) => GROUP_KEYS.includes(g)) : [];
+    return valid.length ? (valid as MachineGroup[]) : [...GROUP_KEYS];
+  } catch {
+    return [...GROUP_KEYS];
+  }
+}
+
+/** Normalise an incoming allowedGroups list; empty/invalid → all groups. */
+function serializeGroups(groups?: MachineGroup[]): string {
+  const valid = (groups ?? []).filter((g) => GROUP_KEYS.includes(g));
+  return JSON.stringify(valid.length ? valid : [...GROUP_KEYS]);
+}
+
+/** The effective groups a user may see (admins always see all). */
+export function userAllowedGroups(id: number, role: Role): MachineGroup[] {
+  if (role === 'admin') return [...GROUP_KEYS];
+  const row = getUserById(id);
+  return parseAllowedGroups(row?.allowed_groups ?? null);
 }
 
 function toPublic(r: UserRow): PublicUser {
@@ -25,6 +53,7 @@ function toPublic(r: UserRow): PublicUser {
     id: r.id,
     username: r.username,
     role: r.role === 'admin' ? 'admin' : 'user',
+    allowedGroups: parseAllowedGroups(r.allowed_groups),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -67,14 +96,26 @@ function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
 }
 
-export function createUser(input: { username: string; password: string; role: Role }): PublicUser {
+export function createUser(input: {
+  username: string;
+  password: string;
+  role: Role;
+  allowedGroups?: MachineGroup[];
+}): PublicUser {
   const now = new Date().toISOString();
   try {
     const res = db
       .prepare(
-        `INSERT INTO user (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO user (username, password_hash, role, created_at, allowed_groups)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(input.username.trim(), hashPassword(input.password), input.role, now);
+      .run(
+        input.username.trim(),
+        hashPassword(input.password),
+        input.role,
+        now,
+        serializeGroups(input.allowedGroups),
+      );
     return toPublic(getUserById(Number(res.lastInsertRowid))!);
   } catch (err) {
     if (isUniqueViolation(err)) throw new Error('Korisničko ime već postoji');
@@ -84,7 +125,7 @@ export function createUser(input: { username: string; password: string; role: Ro
 
 export function updateUser(
   id: number,
-  patch: { username?: string; role?: Role; password?: string },
+  patch: { username?: string; role?: Role; password?: string; allowedGroups?: MachineGroup[] },
 ): PublicUser {
   const existing = getUserById(id);
   if (!existing) throw new Error('Korisnik nije pronađen');
@@ -97,11 +138,14 @@ export function updateUser(
   const username = patch.username?.trim() || existing.username;
   const role = patch.role ?? (existing.role as Role);
   const passwordHash = patch.password ? hashPassword(patch.password) : existing.password_hash;
+  const allowedGroups =
+    patch.allowedGroups !== undefined ? serializeGroups(patch.allowedGroups) : existing.allowed_groups;
 
   try {
     db.prepare(
-      `UPDATE user SET username = ?, role = ?, password_hash = ?, updated_at = ? WHERE id = ?`,
-    ).run(username, role, passwordHash, new Date().toISOString(), id);
+      `UPDATE user SET username = ?, role = ?, password_hash = ?, allowed_groups = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(username, role, passwordHash, allowedGroups, new Date().toISOString(), id);
   } catch (err) {
     if (isUniqueViolation(err)) throw new Error('Korisničko ime već postoji');
     throw err;

@@ -3,6 +3,7 @@ import type {
   ComparisonResult,
   HealthResponse,
   Machine,
+  MachineGroup,
   MachinePosition,
   MachineSeries,
   ManagedUser,
@@ -82,10 +83,16 @@ export const api = {
 
   // ---- Users (admin) ----
   users: () => get<{ users: ManagedUser[] }>('/api/users').then((r) => r.users),
-  createUser: (input: { username: string; password: string; role: Role }) =>
-    send<{ user: ManagedUser }>('/api/users', 'POST', input).then((r) => r.user),
-  updateUser: (id: number, patch: { username?: string; password?: string; role?: Role }) =>
-    send<{ user: ManagedUser }>(`/api/users/${id}`, 'PUT', patch).then((r) => r.user),
+  createUser: (input: {
+    username: string;
+    password: string;
+    role: Role;
+    allowedGroups?: MachineGroup[];
+  }) => send<{ user: ManagedUser }>('/api/users', 'POST', input).then((r) => r.user),
+  updateUser: (
+    id: number,
+    patch: { username?: string; password?: string; role?: Role; allowedGroups?: MachineGroup[] },
+  ) => send<{ user: ManagedUser }>(`/api/users/${id}`, 'PUT', patch).then((r) => r.user),
   deleteUser: (id: number) => send<{ ok: boolean }>(`/api/users/${id}`, 'DELETE'),
 
   // ---- App data ----

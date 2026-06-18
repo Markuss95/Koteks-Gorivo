@@ -115,6 +115,12 @@ export function initSchema(): void {
   if (!machineCols.has('operating_hours')) db.exec('ALTER TABLE machine ADD COLUMN operating_hours REAL');
   if (!machineCols.has('idle_hours')) db.exec('ALTER TABLE machine ADD COLUMN idle_hours REAL');
   if (!machineCols.has('hours_time')) db.exec('ALTER TABLE machine ADD COLUMN hours_time TEXT');
+
+  // Per-user worksite-group visibility (JSON array of group keys). NULL = all groups.
+  const userCols = new Set(
+    (db.prepare('PRAGMA table_info(user)').all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!userCols.has('allowed_groups')) db.exec('ALTER TABLE user ADD COLUMN allowed_groups TEXT');
 }
 
 // ---- Settings helpers ----
