@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { HealthResponse, Machine, MachineGroup } from '../types';
-import { fmtDateTime, shortModel } from '../util';
+import { fmtDateTime, isStale, shortModel } from '../util';
 import { GroupFilter } from '../components/GroupFilter';
 import { MachineMapPanel } from '../components/MachineMapPanel';
 
@@ -157,7 +157,7 @@ export function MachinesPage({
                 return (
                 <tr
                   key={m.serialNumber}
-                  className={`${located ? 'clickable' : ''}${m.serialNumber === selected ? ' selected-row' : ''}`}
+                  className={`${located ? 'clickable' : ''}${m.serialNumber === selected ? ' selected-row' : ''}${isStale(m.lastReadingTime) ? ' stale-row' : ''}`}
                   onClick={located ? () => focusMachine(m.serialNumber) : undefined}
                   title={located ? 'Prikaži na karti' : 'Nema GPS pozicije'}
                 >

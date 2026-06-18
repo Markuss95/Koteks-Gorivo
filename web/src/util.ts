@@ -26,6 +26,20 @@ export function fmt(n: number | null | undefined, digits = 0): string {
   return n.toLocaleString('hr-HR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+// Days since an ISO timestamp; null if missing/invalid.
+export function daysSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return (Date.now() - t) / (1000 * 60 * 60 * 24);
+}
+
+// A machine is "stale" if it hasn't reported to LiDAT within `days` (or never has).
+export function isStale(iso: string | null | undefined, days = 10): boolean {
+  const d = daysSince(iso);
+  return d === null || d > days;
+}
+
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
