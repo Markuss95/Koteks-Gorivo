@@ -27,7 +27,7 @@ type SortKey =
 const MIN_DATE_FALLBACK = '2026-05-27';
 // Hard floor for the date pickers: data before 1 June 2026 is unreliable
 // (incomplete early LiDAT history), so earlier dates are greyed out.
-const DATA_FLOOR = '2026-06-03';
+const DATA_FLOOR = '2026-06-04';
 
 export function ComparisonPage() {
   const [from, setFrom] = useState(daysAgo(10));
