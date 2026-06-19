@@ -121,7 +121,7 @@ export function MachinesPage({
         />
       </div>
 
-      {last && (
+      {isAdmin && last && (
         <div className="panel">
           <h2>Zadnja sinkronizacija</h2>
           <div className="muted" style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>

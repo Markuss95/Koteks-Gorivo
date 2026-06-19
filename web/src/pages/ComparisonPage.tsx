@@ -299,7 +299,13 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
       </div>
 
       {selected && (
-        <MachineDetail serial={selected} from={from} to={to} onClose={() => setSelected(null)} />
+        <MachineDetail
+          serial={selected}
+          from={from}
+          to={to}
+          lastReadingTime={rows.find((m) => m.serialNumber === selected)?.lastReadingTime ?? null}
+          onClose={() => setSelected(null)}
+        />
       )}
     </>
   );

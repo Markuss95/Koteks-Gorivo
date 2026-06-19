@@ -34,7 +34,11 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'operatingHours', dir: -1 });
   const [selected, setSelected] = useState<string | null>(null);
   // Machine whose daily-trend modal is open (null = closed).
-  const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
+  const [detail, setDetail] = useState<{
+    serial: string;
+    model: string;
+    lastReadingTime: string | null;
+  } | null>(null);
   const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
   const mapRef = useRef<HTMLDivElement>(null);
 
@@ -62,9 +66,9 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
   }, []);
 
   // Row click: open the daily-trend modal and highlight the machine on the map.
-  const openDetail = (serial: string, model: string) => {
-    setSelected(serial);
-    setDetail({ serial, model });
+  const openDetail = (m: MachineUtilization) => {
+    setSelected(m.serialNumber);
+    setDetail({ serial: m.serialNumber, model: m.model, lastReadingTime: m.lastReadingTime });
   };
 
   const rows = useMemo<MachineUtilization[]>(() => {
@@ -191,7 +195,7 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
                 <tr
                   key={m.serialNumber}
                   className={`clickable${m.serialNumber === selected ? ' selected-row' : ''}${isStale(m.lastReadingTime) ? ' stale-row' : ''}`}
-                  onClick={() => openDetail(m.serialNumber, m.model)}
+                  onClick={() => openDetail(m)}
                   title="Prikaži graf po danima"
                 >
                   <td>
@@ -231,6 +235,7 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
           model={detail.model}
           from={from}
           to={to}
+          lastReadingTime={detail.lastReadingTime}
           onClose={() => setDetail(null)}
         />
       )}

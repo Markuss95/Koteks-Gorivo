@@ -12,9 +12,8 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { MachinePosition, UtilizationSeries } from '../types';
-import { fmt, fmtDateTime, shortModel, today } from '../util';
+import { fmt, fmtDateTime, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
-import { LastSyncInfo } from './LastSyncInfo';
 import { LocationMiniMap } from './LocationMiniMap';
 
 // Earliest date with reliable position history (matches the other maps).
@@ -26,12 +25,14 @@ export function UtilizationDetail({
   model,
   from,
   to,
+  lastReadingTime,
   onClose,
 }: {
   serial: string;
   model: string;
   from: string;
   to: string;
+  lastReadingTime: string | null;
   onClose: () => void;
 }) {
   const [data, setData] = useState<UtilizationSeries | null>(null);
@@ -101,7 +102,17 @@ export function UtilizationDetail({
           </button>
         </div>
 
-        <LastSyncInfo />
+        <div
+          className={isStale(lastReadingTime) ? 'neg' : 'muted'}
+          style={{
+            fontSize: isStale(lastReadingTime) ? 16 : 12,
+            fontWeight: isStale(lastReadingTime) ? 700 : 400,
+            marginBottom: 12,
+          }}
+        >
+          Zadnji uspješni prijenos podataka:{' '}
+          {lastReadingTime ? fmtDateTime(lastReadingTime) : 'Nema zabilježenog prijenosa'}
+        </div>
 
         <div className="toolbar">
           <div className="field">

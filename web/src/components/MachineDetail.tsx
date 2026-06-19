@@ -11,9 +11,8 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { MachinePosition, MachineSeries } from '../types';
-import { fmt, fmtDateTime, shortModel, today } from '../util';
+import { fmt, fmtDateTime, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
-import { LastSyncInfo } from './LastSyncInfo';
 import { LocationMiniMap } from './LocationMiniMap';
 
 // Earliest date with reliable position history (matches the other maps).
@@ -23,11 +22,13 @@ export function MachineDetail({
   serial,
   from,
   to,
+  lastReadingTime,
   onClose,
 }: {
   serial: string;
   from: string;
   to: string;
+  lastReadingTime: string | null;
   onClose: () => void;
 }) {
   const [data, setData] = useState<MachineSeries | null>(null);
@@ -100,7 +101,17 @@ export function MachineDetail({
           </button>
         </div>
 
-        <LastSyncInfo />
+        <div
+          className={isStale(lastReadingTime) ? 'neg' : 'muted'}
+          style={{
+            fontSize: isStale(lastReadingTime) ? 16 : 12,
+            fontWeight: isStale(lastReadingTime) ? 700 : 400,
+            marginBottom: 12,
+          }}
+        >
+          Zadnji uspješni prijenos podataka:{' '}
+          {lastReadingTime ? fmtDateTime(lastReadingTime) : 'Nema zabilježenog prijenosa'}
+        </div>
 
         {loading && <div className="spinner">Učitavanje…</div>}
         {error && <div className="error-box">{error}</div>}
