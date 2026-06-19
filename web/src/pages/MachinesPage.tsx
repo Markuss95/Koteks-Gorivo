@@ -32,7 +32,9 @@ export function MachinesPage({
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'lastReadingTime', dir: -1 });
   // Selected machine to focus on the map (null = show all).
   const [selected, setSelected] = useState<string | null>(null);
-  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
+  const [groups, setGroups] = useState<Set<MachineGroup>>(
+    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
+  );
   const mapRef = useRef<HTMLDivElement>(null);
   // Bumped after a sync to make the map re-fetch positions.
   const [mapReload, setMapReload] = useState(0);

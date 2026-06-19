@@ -169,6 +169,7 @@ tbody tr.clickable { cursor: pointer; }
 /* Machines with no recent LiDAT report are dimmed so they stand out. */
 tr.stale-row td { opacity: 0.45; }
 .stale-swatch { display: inline-block; width: 22px; height: 10px; border-radius: 2px; background: var(--text); opacity: 0.45; vertical-align: middle; margin-right: 6px; }
+.stale-legend { display: flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 600; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
 
 /* ---- Group filter (worksite checkboxes) ---- */
 .group-filter { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }

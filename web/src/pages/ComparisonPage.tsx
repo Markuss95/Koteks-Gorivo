@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
-import { daysAgo, fmt, isStale, shortModel, today } from '../util';
+import { fmt, isStale, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
@@ -32,18 +32,21 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 const DATA_FLOOR = '2026-06-04';
 
 export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
-  const [from, setFrom] = useState(daysAgo(10));
+  const [from, setFrom] = useState(DATA_FLOOR);
   const [to, setTo] = useState(today());
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [data, setData] = useState<ComparisonResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Default: smallest LiDAT↔Maris discrepancy first (closest agreement).
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({
     key: 'differenceLitres',
-    dir: -1,
+    dir: 1,
   });
   const [selected, setSelected] = useState<string | null>(null);
-  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
+  const [groups, setGroups] = useState<Set<MachineGroup>>(
+    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
+  );
 
   const run = () => {
     setLoading(true);
@@ -61,8 +64,8 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
       .settings()
       .then((s) => {
         setMinDate(s.minDate);
-        const floor = s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR;
-        setFrom((f) => (f < floor ? floor : f));
+        // Default the range start to the earliest selectable (non-grayed) date.
+        setFrom(s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR);
       })
       .catch(() => {});
     run();
@@ -158,7 +161,7 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
           <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
         </div>
         <div className="muted">
-          {data && `Eurodizel (artikli): ${data.fuelArticleCodes.join(', ')}`}
+          {data && `Eurodizel (artikl): ${data.fuelArticleCodes.join(', ')}`}
         </div>
       </div>
 
@@ -315,6 +318,14 @@ function valueFor(m: MachineComparison, key: SortKey): number | string | null {
   switch (key) {
     case 'model':
       return `${shortModel(m.model)} ${m.serialNumber}`;
+    case 'differenceLitres':
+      // Sort by the SIZE of the discrepancy, regardless of direction. Rows with
+      // no usable comparison — exact-zero difference, or no variance (Odstupanje
+      // "—", i.e. no LiDAT consumption) — are treated as null so they sink to the
+      // bottom.
+      return m.differenceLitres === null || m.differenceLitres === 0 || m.variancePct === null
+        ? null
+        : Math.abs(m.differenceLitres);
     default:
       return m[key];
   }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { MachineGroup, MachineUtilization, UtilizationResult } from '../types';
-import { daysAgo, fmt, isStale, shortModel, today } from '../util';
+import { fmt, isStale, shortModel, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { StaleLegend } from '../components/StaleLegend';
@@ -24,7 +24,7 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 const DATA_FLOOR = '2026-06-04';
 
 export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
-  const [from, setFrom] = useState(daysAgo(10));
+  const [from, setFrom] = useState(DATA_FLOOR);
   const [to, setTo] = useState(today());
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [data, setData] = useState<UtilizationResult | null>(null);
@@ -39,7 +39,9 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
     model: string;
     lastReadingTime: string | null;
   } | null>(null);
-  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
+  const [groups, setGroups] = useState<Set<MachineGroup>>(
+    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
+  );
   const mapRef = useRef<HTMLDivElement>(null);
 
   const run = () => {
@@ -57,8 +59,8 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
       .settings()
       .then((s) => {
         setMinDate(s.minDate);
-        const floor = s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR;
-        setFrom((f) => (f < floor ? floor : f));
+        // Default the range start to the earliest selectable (non-grayed) date.
+        setFrom(s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR);
       })
       .catch(() => {});
     run();

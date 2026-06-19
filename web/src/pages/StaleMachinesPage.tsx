@@ -33,7 +33,9 @@ export function StaleMachinesPage({ allowedGroups }: { allowedGroups: MachineGro
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(allowedGroups));
+  const [groups, setGroups] = useState<Set<MachineGroup>>(
+    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
+  );
   const mapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
