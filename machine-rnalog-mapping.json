@@ -49,11 +49,11 @@
     { "model": "TA 230", "serialNumber": "170132", "rnalogs": ["4V/340"] },
     { "model": "R 938", "serialNumber": "62468", "rnalogs": ["4M/365"] },
     { "model": "L 576", "serialNumber": "56573", "rnalogs": ["4M/367"] },
-    { "model": "R 938", "serialNumber": "50171", "rnalogs": ["M/801205"], "notes": "not on AEMP/LiDAT yet — Maris only for now" },
-    { "model": "R 946", "serialNumber": "43581", "rnalogs": ["M/801206"], "notes": "not on AEMP/LiDAT yet — Maris only for now" },
-    { "model": "L 580", "serialNumber": "43330", "rnalogs": ["M/801204"], "notes": "not on AEMP/LiDAT yet — Maris only for now" },
-    { "model": "L 576", "serialNumber": "42441", "rnalogs": ["M/801207"], "notes": "not on AEMP/LiDAT yet — Maris only for now" },
-    { "model": "R 938", "serialNumber": "55119", "rnalogs": ["M/801209"], "notes": "not on AEMP/LiDAT yet — Maris only for now" },
-    { "model": "L 580", "serialNumber": "69205", "rnalogs": ["M/801210"], "notes": "not on AEMP/LiDAT yet — Maris only for now" }
+    { "model": "R 938", "serialNumber": "50171", "rnalogs": ["M/801205"], "notes": "Kamen Psunj — on the Kam_Oku AEMP login (added 2026-07-06)" },
+    { "model": "R 946", "serialNumber": "43581", "rnalogs": ["M/801206"], "notes": "Kamen Psunj — on the Kam_Oku AEMP login (added 2026-07-06)" },
+    { "model": "L 580", "serialNumber": "43330", "rnalogs": ["M/801204"], "notes": "Kamen Psunj — on the Kam_Oku AEMP login (added 2026-07-06)" },
+    { "model": "L 576", "serialNumber": "42441", "rnalogs": ["M/801207"], "notes": "Kamen Psunj — on the Kam_Oku AEMP login (added 2026-07-06)" },
+    { "model": "R 938", "serialNumber": "55119", "rnalogs": ["M/801209"], "notes": "Kamen Psunj — on the Kam_Oku AEMP login (added 2026-07-06)" },
+    { "model": "L 580", "serialNumber": "69205", "rnalogs": ["M/801210"], "notes": "Kamen Psunj — on the Kam_Oku AEMP login (added 2026-07-06)" }
   ]
 }

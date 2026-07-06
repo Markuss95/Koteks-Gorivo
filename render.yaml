@@ -53,6 +53,11 @@ services:
         sync: false
       - key: LIDAT_PASSWORD_2
         sync: false
+      # Third AEMP login (Kamen Okučani → Kamen Psunj fleet). Add in the dashboard.
+      - key: LIDAT_USERNAME_3
+        sync: false
+      - key: LIDAT_PASSWORD_3
+        sync: false
       # Set to your Netlify site URL once known, e.g. https://koteks-gorivo.netlify.app
       - key: CORS_ORIGIN
         sync: false
