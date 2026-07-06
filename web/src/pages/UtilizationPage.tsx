@@ -61,9 +61,16 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
         setFrom(s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR);
       })
       .catch(() => {});
-    run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-run whenever the date range changes — including when selecting a
+  // later-starting group clamps `from` up. Also covers the initial load. The
+  // "Prikaži" button stays for an explicit manual re-fetch.
+  useEffect(() => {
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
 
   // Row click: open the daily-trend modal and highlight the machine on the map.
   const openDetail = (m: MachineUtilization) => {

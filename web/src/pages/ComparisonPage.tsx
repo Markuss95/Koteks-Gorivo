@@ -65,9 +65,16 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
         setFrom(s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR);
       })
       .catch(() => {});
-    run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-run the comparison whenever the date range changes — including when
+  // selecting a later-starting group clamps `from` up. Also covers the initial
+  // load. The "Usporedi" button stays for an explicit manual re-fetch.
+  useEffect(() => {
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
 
   const rows = useMemo(() => {
     if (!data) return [];
