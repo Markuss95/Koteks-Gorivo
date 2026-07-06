@@ -8,8 +8,8 @@ export const DATA_FLOOR = '2026-06-04';
 // (AEMP) login that was only added on 2026-07-06; LiDAT serves ~14 days of
 // history, so nothing reliable exists for those groups before this date.
 const GROUP_DATA_FLOOR: Partial<Record<MachineGroup, string>> = {
-  velicki: '2026-06-25',
-  psunj: '2026-06-25',
+  velicki: '2026-06-26',
+  psunj: '2026-06-26',
 };
 
 /**
