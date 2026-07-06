@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { config, type LidatAccount } from '../config.js';
 import {
   fetchFleetSnapshot,
   fetchCumulativeFuelUsed,
@@ -121,11 +122,25 @@ export async function runLidatSync(): Promise<{
     const knownSerials = new Set(known.map((k) => k.serial_number));
 
     // 1) Fleet snapshot: discover LiDAT identity + a current cumulative reading.
+    // Each AEMP account serves its own (disjoint) fleet, so we fetch every
+    // account and remember which account owns each serial — the per-machine
+    // time-series backfill below must query that same account.
     const fetchedAt = new Date().toISOString();
-    const snapshot = await fetchFleetSnapshot();
-    const upsertSnapshot = db.transaction(() => {
+    const serialAccount = new Map<string, LidatAccount>();
+
+    for (const account of config.lidat.accounts) {
+      let snapshot;
+      try {
+        snapshot = await fetchFleetSnapshot(account);
+      } catch (err) {
+        errors.push(`fleet ${account.label}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      const upsertSnapshot = db.transaction(() => {
       for (const eq of snapshot) {
         if (!knownSerials.has(eq.serialNumber)) continue;
+        // First account to report a serial owns it (fleets are disjoint anyway).
+        if (!serialAccount.has(eq.serialNumber)) serialAccount.set(eq.serialNumber, account);
         updateIdentity.run({
           serialNumber: eq.serialNumber,
           oemName: eq.oemName || null,
@@ -175,8 +190,9 @@ export async function runLidatSync(): Promise<{
           });
         }
       }
-    });
-    upsertSnapshot();
+      });
+      upsertSnapshot();
+    }
 
     // 2) Per-machine 14-day backfill of the cumulative fuel time series.
     const machines = db
@@ -194,8 +210,15 @@ export async function runLidatSync(): Promise<{
     const endUtc = end.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
     for (const m of machines) {
+      // Which AEMP account serves this machine? Discovered from the fleet
+      // snapshots above; a machine on no account (e.g. not yet onboarded to
+      // LiDAT) has no time-series to fetch, so skip it.
+      const account = serialAccount.get(m.serial_number);
+      if (!account) continue;
+
       try {
         const readings = await fetchCumulativeFuelUsed(
+          account,
           { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
           startUtc,
           endUtc,
@@ -226,8 +249,9 @@ export async function runLidatSync(): Promise<{
       try {
         const machineRef = { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number };
         const [operating, idle] = await Promise.all([
-          fetchCumulativeHours(machineRef, 'CumulativeOperatingHours', startUtc, endUtc),
+          fetchCumulativeHours(account, machineRef, 'CumulativeOperatingHours', startUtc, endUtc),
           fetchCumulativeHours(
+            account,
             machineRef,
             'CumulativeNonProductiveIdleHours',
             startUtc,
@@ -266,6 +290,7 @@ export async function runLidatSync(): Promise<{
       // machine's fuel sync, so it runs in its own try/catch.
       try {
         const locs = await fetchLocationHistory(
+          account,
           { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
           startUtc,
           endUtc,

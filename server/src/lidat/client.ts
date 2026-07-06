@@ -1,5 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
-import { config } from '../config.js';
+import { config, type LidatAccount } from '../config.js';
 
 export interface LidatEquipment {
   oemName: string;
@@ -48,8 +48,8 @@ const parser = new XMLParser({
   trimValues: true,
 });
 
-function basicAuthHeader(): string {
-  const token = Buffer.from(`${config.lidat.username}:${config.lidat.password}`).toString('base64');
+function basicAuthHeader(account: LidatAccount): string {
+  const token = Buffer.from(`${account.username}:${account.password}`).toString('base64');
   return `Basic ${token}`;
 }
 
@@ -63,14 +63,16 @@ function toArray<T>(v: T | T[] | undefined | null): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-async function fetchXml(pathSuffix: string): Promise<any> {
-  const url = `${config.lidat.baseUrl}${pathSuffix}`;
+async function fetchXml(account: LidatAccount, pathSuffix: string): Promise<any> {
+  const url = `${account.baseUrl}${pathSuffix}`;
   const res = await fetch(url, {
-    headers: { Authorization: basicAuthHeader(), Accept: 'application/xml' },
+    headers: { Authorization: basicAuthHeader(account), Accept: 'application/xml' },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`LiDAT request failed (${res.status}) for ${pathSuffix}: ${text.slice(0, 300)}`);
+    throw new Error(
+      `LiDAT request failed (${res.status}) for ${account.label} ${pathSuffix}: ${text.slice(0, 300)}`,
+    );
   }
   const xml = await res.text();
   return parser.parse(xml);
@@ -131,14 +133,14 @@ function parseLocation(eq: any): Pick<
   };
 }
 
-/** Pull all pages of the current fleet snapshot. */
-export async function fetchFleetSnapshot(): Promise<LidatEquipment[]> {
+/** Pull all pages of the current fleet snapshot for one AEMP account. */
+export async function fetchFleetSnapshot(account: LidatAccount): Promise<LidatEquipment[]> {
   const out: LidatEquipment[] = [];
   let page = 1;
   const maxPages = 100; // safety bound
 
   while (page <= maxPages) {
-    const doc = await fetchXml(`/Aemp2/Fleet/${page}`);
+    const doc = await fetchXml(account, `/Aemp2/Fleet/${page}`);
     const fleet = doc?.Fleet ?? doc;
     const equipment = toArray(fleet?.Equipment);
     if (equipment.length === 0) break;
@@ -180,6 +182,7 @@ export async function fetchFleetSnapshot(): Promise<LidatEquipment[]> {
  * LiDAT only serves up to 14 days in the past, so callers should chunk longer ranges.
  */
 export async function fetchCumulativeFuelUsed(
+  account: LidatAccount,
   machine: { oemName: string; model: string; serialNumber: string },
   startUtc: string,
   endUtc: string,
@@ -193,7 +196,7 @@ export async function fetchCumulativeFuelUsed(
 
   while (page <= maxPages) {
     const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/CumulativeFuelUsed/${startUtc}/${endUtc}/${page}`;
-    const doc = await fetchXml(suffix);
+    const doc = await fetchXml(account, suffix);
     // Time-data root is <FuelUsedMessages> with <FuelUsed> children directly.
     const root = doc?.FuelUsedMessages ?? doc?.Fleet ?? doc;
     const readings = toArray(root?.FuelUsed);
@@ -220,6 +223,7 @@ export async function fetchCumulativeFuelUsed(
  * Same 14-day-window limit as the fuel series, so callers chunk longer ranges.
  */
 export async function fetchLocationHistory(
+  account: LidatAccount,
   machine: { oemName: string; model: string; serialNumber: string },
   startUtc: string,
   endUtc: string,
@@ -233,7 +237,7 @@ export async function fetchLocationHistory(
 
   while (page <= maxPages) {
     const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/Locations/${startUtc}/${endUtc}/${page}`;
-    const doc = await fetchXml(suffix);
+    const doc = await fetchXml(account, suffix);
     // Time-data root varies by version; accept the common roots and pull <Location> children.
     const root = doc?.LocationMessages ?? doc?.Locations ?? doc?.Fleet ?? doc;
     const nodes = toArray(root?.Location);
@@ -267,6 +271,7 @@ export async function fetchLocationHistory(
  * value + a `datetime` attribute. LiDAT serves at most 14 days in the past.
  */
 export async function fetchCumulativeHours(
+  account: LidatAccount,
   machine: { oemName: string; model: string; serialNumber: string },
   urlMetric: 'CumulativeOperatingHours' | 'CumulativeNonProductiveIdleHours',
   startUtc: string,
@@ -282,7 +287,7 @@ export async function fetchCumulativeHours(
 
   while (page <= maxPages) {
     const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/${urlMetric}/${startUtc}/${endUtc}/${page}`;
-    const doc = await fetchXml(suffix);
+    const doc = await fetchXml(account, suffix);
     // Pull the per-metric children (each holds an <Hour> value + `datetime` attr).
     const root = doc?.[`${elementName}Messages`] ?? doc?.Fleet ?? doc;
     const nodes = toArray(root?.[elementName]);
@@ -301,13 +306,37 @@ export async function fetchCumulativeHours(
   return out;
 }
 
-export async function lidatHealth(): Promise<{ ok: boolean; message: string }> {
-  try {
-    const doc = await fetchXml('/Aemp2/Fleet/1');
-    const fleet = doc?.Fleet ?? doc;
-    const count = toArray(fleet?.Equipment).length;
-    return { ok: true, message: `Fleet page 1 returned ${count} machine(s)` };
-  } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err) };
-  }
+export interface LidatAccountHealth {
+  label: string;
+  ok: boolean;
+  message: string;
+}
+
+/** Probe every configured AEMP account. `ok` is true only if all accounts pass. */
+export async function lidatHealth(): Promise<{
+  ok: boolean;
+  message: string;
+  accounts: LidatAccountHealth[];
+}> {
+  const accounts = await Promise.all(
+    config.lidat.accounts.map(async (account): Promise<LidatAccountHealth> => {
+      try {
+        const doc = await fetchXml(account, '/Aemp2/Fleet/1');
+        const fleet = doc?.Fleet ?? doc;
+        const count = toArray(fleet?.Equipment).length;
+        return { label: account.label, ok: true, message: `Fleet page 1 returned ${count} machine(s)` };
+      } catch (err) {
+        return {
+          label: account.label,
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }),
+  );
+  const ok = accounts.every((a) => a.ok);
+  const message = ok
+    ? `${accounts.length} account(s) OK: ${accounts.map((a) => `${a.label} (${a.message})`).join('; ')}`
+    : `Failing: ${accounts.filter((a) => !a.ok).map((a) => `${a.label} — ${a.message}`).join('; ')}`;
+  return { ok, message, accounts };
 }

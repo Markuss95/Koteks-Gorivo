@@ -19,6 +19,45 @@ function optional(name: string, fallback: string): string {
 const serverRoot = path.resolve(__dirname, '..');
 const dbPathRaw = optional('DB_PATH', './data/koteks-gorivo.db');
 
+/** One LiDAT AEMP login. Each login exposes its own (disjoint) fleet scope. */
+export interface LidatAccount {
+  label: string;
+  baseUrl: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * Build the list of LiDAT accounts. The primary account comes from
+ * LIDAT_USERNAME/LIDAT_PASSWORD (+ LIDAT_BASE_URL). Additional accounts are read
+ * from numbered suffixes LIDAT_USERNAME_2/LIDAT_PASSWORD_2, _3, ... — each may
+ * override the base URL (LIDAT_BASE_URL_2) and set a label (LIDAT_LABEL_2),
+ * otherwise it reuses the shared base URL. Enumeration stops at the first gap.
+ */
+function buildLidatAccounts(): LidatAccount[] {
+  const baseUrl = required('LIDAT_BASE_URL').replace(/\/+$/, '');
+  const accounts: LidatAccount[] = [
+    {
+      label: optional('LIDAT_LABEL', 'primary'),
+      baseUrl,
+      username: required('LIDAT_USERNAME'),
+      password: required('LIDAT_PASSWORD'),
+    },
+  ];
+  for (let i = 2; ; i++) {
+    const username = process.env[`LIDAT_USERNAME_${i}`];
+    const password = process.env[`LIDAT_PASSWORD_${i}`];
+    if (!username || !password) break;
+    accounts.push({
+      label: optional(`LIDAT_LABEL_${i}`, `account-${i}`),
+      baseUrl: optional(`LIDAT_BASE_URL_${i}`, baseUrl),
+      username,
+      password,
+    });
+  }
+  return accounts;
+}
+
 export const config = {
   port: Number(optional('PORT', '4000')),
   dbPath: path.isAbsolute(dbPathRaw) ? dbPathRaw : path.resolve(serverRoot, dbPathRaw),
@@ -36,9 +75,10 @@ export const config = {
   },
 
   lidat: {
-    baseUrl: required('LIDAT_BASE_URL').replace(/\/+$/, ''),
-    username: required('LIDAT_USERNAME'),
-    password: required('LIDAT_PASSWORD'),
+    // One or more AEMP logins. Each login serves its own (disjoint) set of
+    // machines; the sync fetches every account's fleet and routes each machine's
+    // time-series queries to the account that owns it.
+    accounts: buildLidatAccounts(),
   },
 
   sync: {
