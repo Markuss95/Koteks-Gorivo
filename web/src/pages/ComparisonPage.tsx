@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
-import { fmt, isStale, shortModel, today } from '../util';
+import { DATA_FLOOR, effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
@@ -27,9 +27,6 @@ type SortKey =
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
-// Hard floor for the date pickers: data before 1 June 2026 is unreliable
-// (incomplete early LiDAT history), so earlier dates are greyed out.
-const DATA_FLOOR = '2026-06-04';
 
 export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
   const [from, setFrom] = useState(DATA_FLOOR);
@@ -125,8 +122,15 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
 
-  // Effective picker floor: never earlier than the 1 June data cutoff.
-  const effectiveMin = minDate > DATA_FLOOR ? minDate : DATA_FLOOR;
+  // Effective picker floor: the strictest of the data cutoff and the selected
+  // groups' floors (Velički Kamen / Kamen Psunj start later — see util).
+  const effectiveMin = useMemo(() => effectiveDateFloor(minDate, groups), [minDate, groups]);
+
+  // If selecting a later-starting group pushes the floor past the current start,
+  // clamp `from` up so the picker never holds a now-greyed-out date.
+  useEffect(() => {
+    if (from < effectiveMin) setFrom(effectiveMin);
+  }, [effectiveMin, from]);
 
   const [exporting, setExporting] = useState<null | 'pdf' | 'excel'>(null);
   const runExport = async (kind: 'pdf' | 'excel') => {

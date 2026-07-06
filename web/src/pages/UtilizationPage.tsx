@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { MachineGroup, MachineUtilization, UtilizationResult } from '../types';
-import { fmt, isStale, shortModel, today } from '../util';
+import { DATA_FLOOR, effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { StaleLegend } from '../components/StaleLegend';
@@ -20,8 +20,6 @@ type SortKey =
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
-// Hard floor for the date pickers: data before 1 June 2026 is unreliable.
-const DATA_FLOOR = '2026-06-04';
 
 export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
   const [from, setFrom] = useState(DATA_FLOOR);
@@ -118,7 +116,14 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 }));
 
-  const effectiveMin = minDate > DATA_FLOOR ? minDate : DATA_FLOOR;
+  // Strictest of the data cutoff and the selected groups' floors (Velički Kamen
+  // / Kamen Psunj start later — see util).
+  const effectiveMin = useMemo(() => effectiveDateFloor(minDate, groups), [minDate, groups]);
+
+  // Clamp `from` up if a later-starting group pushes the floor past it.
+  useEffect(() => {
+    if (from < effectiveMin) setFrom(effectiveMin);
+  }, [effectiveMin, from]);
 
   return (
     <>

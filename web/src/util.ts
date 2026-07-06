@@ -1,3 +1,32 @@
+import type { MachineGroup } from './types';
+
+// Global hard floor for the date pickers: data before this is unreliable
+// (incomplete early LiDAT history).
+export const DATA_FLOOR = '2026-06-04';
+
+// Per-group data floors. Velički Kamen & Kamen Psunj run on a separate LiDAT
+// (AEMP) login that was only added on 2026-07-06; LiDAT serves ~14 days of
+// history, so nothing reliable exists for those groups before this date.
+const GROUP_DATA_FLOOR: Partial<Record<MachineGroup, string>> = {
+  velicki: '2026-06-25',
+  psunj: '2026-06-25',
+};
+
+/**
+ * Earliest selectable date for the pickers, given the backend's reported floor
+ * and the currently-selected worksite groups. Selecting a group with a later
+ * floor (Velički Kamen / Kamen Psunj) greys out the earlier days. ISO
+ * 'YYYY-MM-DD' strings compare lexicographically, so max = the strictest floor.
+ */
+export function effectiveDateFloor(minDate: string, groups: Iterable<MachineGroup>): string {
+  let floor = minDate > DATA_FLOOR ? minDate : DATA_FLOOR;
+  for (const g of groups) {
+    const f = GROUP_DATA_FLOOR[g];
+    if (f && f > floor) floor = f;
+  }
+  return floor;
+}
+
 // LiDAT model is "Class:Series:Type:SpecificType" (e.g. "Wheelloader:Large_size:L576:1333").
 // Drop the leading classification (Class, Series) and show from the model name onward
 // → "L576:1333". Labels without that structure (e.g. "L 576") are returned unchanged.
