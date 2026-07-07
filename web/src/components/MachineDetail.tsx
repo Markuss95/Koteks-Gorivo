@@ -212,6 +212,7 @@ export function MachineDetail({
                 <thead>
                   <tr>
                     <th>Datum</th>
+                    <th>Skladište</th>
                     <th>Dokument</th>
                     <th>Radni nalog</th>
                     <th>Artikl</th>
@@ -222,6 +223,10 @@ export function MachineDetail({
                   {data.marisItems.map((it, i) => (
                     <tr key={i}>
                       <td>{fmtDateTime(it.datum)}</td>
+                      <td>
+                        {it.sklNaziv || '—'}{' '}
+                        {it.sklSifra && <span className="muted">({it.sklSifra})</span>}
+                      </td>
                       <td className="muted">
                         {it.dokNaziv} {it.dokBroj}
                       </td>
@@ -236,7 +241,7 @@ export function MachineDetail({
                   ))}
                   {data.marisItems.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 20 }}>
+                      <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 20 }}>
                         Nema izdatnica goriva u razdoblju.
                       </td>
                     </tr>

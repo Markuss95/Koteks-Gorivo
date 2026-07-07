@@ -175,6 +175,8 @@ export interface MachineSeries {
   marisItems: Array<{
     datum: string;
     rnalog: string;
+    sklSifra: string;
+    sklNaziv: string;
     dokNaziv: string;
     dokBroj: number;
     artSifra: string;

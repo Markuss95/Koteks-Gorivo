@@ -166,6 +166,8 @@ api.get('/machines/:serial/series', async (req, res) => {
         marisItems.push({
           datum: it.DATUM,
           rnalog: it.RNALOG,
+          sklSifra: it.SKL_SIFRA,
+          sklNaziv: it.SKL_NAZIV,
           dokNaziv: it.DOK_NAZIV,
           dokBroj: it.DOK_BROJ,
           artSifra: it.ART_SIFRA,
