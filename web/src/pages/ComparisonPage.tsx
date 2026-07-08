@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
-import { DATA_FLOOR, effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
+import { effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
@@ -29,7 +29,13 @@ type SortKey =
 const MIN_DATE_FALLBACK = '2026-05-27';
 
 export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
-  const [from, setFrom] = useState(DATA_FLOOR);
+  // Groups shown by default: Osijek if available, otherwise whatever the user has.
+  const initialGroups: MachineGroup[] = allowedGroups.includes('osijek')
+    ? ['osijek']
+    : allowedGroups;
+  // Start `from` at the group-aware floor so the very first fetch already uses the
+  // correct range (a Velički/Psunj-only user must start at 26 Jun, not 4 Jun).
+  const [from, setFrom] = useState(() => effectiveDateFloor(MIN_DATE_FALLBACK, initialGroups));
   const [to, setTo] = useState(today());
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [data, setData] = useState<ComparisonResult | null>(null);
@@ -41,29 +47,37 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
     dir: 1,
   });
   const [selected, setSelected] = useState<string | null>(null);
-  const [groups, setGroups] = useState<Set<MachineGroup>>(
-    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
-  );
+  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(initialGroups));
 
+  // Monotonic id of the latest in-flight request; older responses are ignored so
+  // an out-of-order fetch can never overwrite a newer one (fixes the login race).
+  const reqSeq = useRef(0);
   const run = () => {
     setLoading(true);
     setError(null);
+    const seq = ++reqSeq.current;
     api
       .comparison(from, to)
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (seq === reqSeq.current) setData(d);
+      })
+      .catch((e) => {
+        if (seq === reqSeq.current) setError(e.message);
+      })
+      .finally(() => {
+        if (seq === reqSeq.current) setLoading(false);
+      });
   };
 
   useEffect(() => {
-    // Pull the authoritative data floor from the backend and clamp if needed.
+    // Pull the authoritative data floor from the backend. `from` is not set here:
+    // it already starts at the group-aware floor, and the clamp effect below
+    // raises it if the backend reports a later minDate. Setting it here would
+    // reset a Velički/Psunj-only user back to the global floor and trigger a
+    // second, racing fetch.
     api
       .settings()
-      .then((s) => {
-        setMinDate(s.minDate);
-        // Default the range start to the earliest selectable (non-grayed) date.
-        setFrom(s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR);
-      })
+      .then((s) => setMinDate(s.minDate))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

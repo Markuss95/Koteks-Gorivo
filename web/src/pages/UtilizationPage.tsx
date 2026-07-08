@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { MachineGroup, MachineUtilization, UtilizationResult } from '../types';
-import { DATA_FLOOR, effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
+import { effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { StaleLegend } from '../components/StaleLegend';
@@ -22,7 +22,13 @@ type SortKey =
 const MIN_DATE_FALLBACK = '2026-05-27';
 
 export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
-  const [from, setFrom] = useState(DATA_FLOOR);
+  // Groups shown by default: Osijek if available, otherwise whatever the user has.
+  const initialGroups: MachineGroup[] = allowedGroups.includes('osijek')
+    ? ['osijek']
+    : allowedGroups;
+  // Start `from` at the group-aware floor so the first fetch already uses the
+  // correct range (a Velički/Psunj-only user must start at 26 Jun, not 4 Jun).
+  const [from, setFrom] = useState(() => effectiveDateFloor(MIN_DATE_FALLBACK, initialGroups));
   const [to, setTo] = useState(today());
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [data, setData] = useState<UtilizationResult | null>(null);
@@ -37,29 +43,36 @@ export function UtilizationPage({ allowedGroups }: { allowedGroups: MachineGroup
     model: string;
     lastReadingTime: string | null;
   } | null>(null);
-  const [groups, setGroups] = useState<Set<MachineGroup>>(
-    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
-  );
+  const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(initialGroups));
   const mapRef = useRef<HTMLDivElement>(null);
 
+  // Monotonic id of the latest in-flight request; older responses are ignored so
+  // an out-of-order fetch can never overwrite a newer one (fixes the login race).
+  const reqSeq = useRef(0);
   const run = () => {
     setLoading(true);
     setError(null);
+    const seq = ++reqSeq.current;
     api
       .utilization(from, to)
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (seq === reqSeq.current) setData(d);
+      })
+      .catch((e) => {
+        if (seq === reqSeq.current) setError(e.message);
+      })
+      .finally(() => {
+        if (seq === reqSeq.current) setLoading(false);
+      });
   };
 
   useEffect(() => {
+    // Only load the backend minDate here; `from` already starts at the group-aware
+    // floor and the clamp effect raises it if needed. Setting it here would reset
+    // a Velički/Psunj-only user to the global floor and cause a racing fetch.
     api
       .settings()
-      .then((s) => {
-        setMinDate(s.minDate);
-        // Default the range start to the earliest selectable (non-grayed) date.
-        setFrom(s.minDate > DATA_FLOOR ? s.minDate : DATA_FLOOR);
-      })
+      .then((s) => setMinDate(s.minDate))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
