@@ -80,11 +80,11 @@ export function App() {
           <button className={activeTab === 'utilization' ? 'active' : ''} onClick={() => setTab('utilization')}>
             Iskorištenost
           </button>
-          <button className={activeTab === 'machines' ? 'active' : ''} onClick={() => setTab('machines')}>
-            Opće Informacije
-          </button>
           <button className={activeTab === 'stale' ? 'active' : ''} onClick={() => setTab('stale')}>
             Neaktivni strojevi
+          </button>
+          <button className={activeTab === 'machines' ? 'active' : ''} onClick={() => setTab('machines')}>
+            Opće Informacije
           </button>
           <button className={activeTab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
             Postavke
