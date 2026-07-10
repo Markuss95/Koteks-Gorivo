@@ -88,6 +88,20 @@ export function MachineDetail({
 
   const marisTotal = data?.marisItems.reduce((s, i) => s + (i.kolicina || 0), 0) ?? 0;
 
+  // LiDAT consumed over the period = span of the cumulative-fuel readings
+  // (last − first). Cumulative fuel is monotonic, so max − min is the total.
+  const lidatTotal = (() => {
+    const rs = data?.lidatReadings ?? [];
+    if (rs.length < 2) return 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const r of rs) {
+      if (r.fuelConsumedCum < min) min = r.fuelConsumedCum;
+      if (r.fuelConsumedCum > max) max = r.fuelConsumedCum;
+    }
+    return max - min;
+  })();
+
   return (
     <div className="drawer-overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
@@ -125,9 +139,9 @@ export function MachineDetail({
                 <div className="sub">{data.marisItems.length} izdatnica</div>
               </div>
               <div className="card">
-                <div className="label">LiDAT očitanja</div>
-                <div className="value lidat">{data.lidatReadings.length}</div>
-                <div className="sub">u razdoblju</div>
+                <div className="label">LiDAT potrošeno</div>
+                <div className="value lidat">{fmt(lidatTotal, 1)} L</div>
+                <div className="sub">{data.lidatReadings.length} očitanja</div>
               </div>
             </div>
 
