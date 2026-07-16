@@ -29,10 +29,10 @@ type SortKey =
 const MIN_DATE_FALLBACK = '2026-05-27';
 
 export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
-  // Groups shown by default: Osijek if available, otherwise whatever the user has.
-  const initialGroups: MachineGroup[] = allowedGroups.includes('osijek')
-    ? ['osijek']
-    : allowedGroups;
+  // Exactly one group is shown at a time: Osijek if available, else the user's first.
+  const initialGroups: MachineGroup[] = [
+    allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek',
+  ];
   // Start `from` at the group-aware floor so the very first fetch already uses the
   // correct range (a Velički/Psunj-only user must start at 26 Jun, not 4 Jun).
   const [from, setFrom] = useState(() => effectiveDateFloor(MIN_DATE_FALLBACK, initialGroups));
@@ -196,7 +196,7 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
           {loading ? 'Učitavanje…' : 'Usporedi'}
         </button>
         <div style={{ marginLeft: 'auto' }}>
-          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
+          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} single />
         </div>
         <div className="muted">
           {data && `Eurodizel (artikl): ${data.fuelArticleCodes.join(', ')}`}

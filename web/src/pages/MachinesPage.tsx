@@ -32,8 +32,9 @@ export function MachinesPage({
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'lastReadingTime', dir: -1 });
   // Selected machine to focus on the map (null = show all).
   const [selected, setSelected] = useState<string | null>(null);
+  // Exactly one group is shown at a time: Osijek if available, else the user's first.
   const [groups, setGroups] = useState<Set<MachineGroup>>(
-    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
+    () => new Set<MachineGroup>([allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek']),
   );
   const mapRef = useRef<HTMLDivElement>(null);
   // Bumped after a sync to make the map re-fetch positions.
@@ -108,7 +109,7 @@ export function MachinesPage({
           Osvježi
         </button>
         <div style={{ marginLeft: 'auto' }}>
-          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
+          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} single />
         </div>
       </div>
 

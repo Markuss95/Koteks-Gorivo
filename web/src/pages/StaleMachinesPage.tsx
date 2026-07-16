@@ -33,8 +33,9 @@ export function StaleMachinesPage({ allowedGroups }: { allowedGroups: MachineGro
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Exactly one group is shown at a time: Osijek if available, else the user's first.
   const [groups, setGroups] = useState<Set<MachineGroup>>(
-    () => new Set(allowedGroups.includes('osijek') ? ['osijek'] : allowedGroups),
+    () => new Set<MachineGroup>([allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek']),
   );
   const mapRef = useRef<HTMLDivElement>(null);
 
@@ -81,7 +82,7 @@ export function StaleMachinesPage({ allowedGroups }: { allowedGroups: MachineGro
           lokacijom.
         </div>
         <div style={{ marginLeft: 'auto' }}>
-          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} />
+          <GroupFilter value={groups} onChange={setGroups} options={allowedGroups} single />
         </div>
       </div>
 
