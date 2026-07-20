@@ -9,15 +9,8 @@ function fileStem(from: string, to: string, kind = 'gorivo'): string {
   return `koteks-${kind}_${from}_${to}`;
 }
 
-// "nepotpuno" avoids the č in "djelomično" purely for safety; both libs are
-// Unicode-safe, but the plain word keeps every backend happy.
-function labelWithPartial(model: string, serial: string, partial: boolean): string {
-  const base = `${shortModel(model)} ${serial}`;
-  return partial ? `${base} (nepotpuno)` : base;
-}
-
 function machineLabel(m: MachineComparison): string {
-  return labelWithPartial(m.model, m.serialNumber, m.lidatPartial);
+  return `${shortModel(m.model)} ${m.serialNumber}`;
 }
 
 function round1(n: number): number {
@@ -50,6 +43,61 @@ const ACTIVITY_EXTRA_COLUMNS = [
 /** Per-serial utilization, used to append the activity columns. */
 export type ActivityBySerial = Map<string, MachineUtilization>;
 
+// ---- Machines left out of the matched fuel report ----
+
+const hasMaris = (m: MachineComparison) => m.marisIssuedLitres > 0;
+const hasLidat = (m: MachineComparison) =>
+  m.lidatConsumedLitres !== null && m.lidatConsumedLitres > 0;
+
+const EXCLUDED_COLUMNS = [
+  'Stroj',
+  'Radni nalog',
+  'Maris izdano (L)',
+  'LiDAT potrošeno (L)',
+  'Zadnji kontakt',
+] as const;
+
+/**
+ * The machines the matched report leaves out, split by *why* they were left out.
+ * Empty groups are dropped, so a report only shows the categories it actually has.
+ */
+export function groupExcluded(
+  excluded: MachineComparison[],
+): Array<{ title: string; note: string; rows: MachineComparison[] }> {
+  const marisOnly = excluded.filter((m) => hasMaris(m) && !hasLidat(m));
+  const lidatOnly = excluded.filter((m) => !hasMaris(m) && hasLidat(m));
+  const neither = excluded.filter((m) => !hasMaris(m) && !hasLidat(m));
+
+  return [
+    {
+      title: `Samo Maris izdanje — nema LiDAT potrošnje (${marisOnly.length})`,
+      note: 'Gorivo je izdano iz skladišta, ali LiDAT nije zabilježio potrošnju — provjeriti javlja li se stroj.',
+      rows: marisOnly,
+    },
+    {
+      title: `Samo LiDAT potrošnja — nema Maris izdanja (${lidatOnly.length})`,
+      note: 'Stroj je trošio gorivo, ali u razdoblju nema izdatnice — gorivo je vjerojatno izdano izvan razdoblja ili na drugi radni nalog.',
+      rows: lidatOnly,
+    },
+    {
+      title: `Bez Maris i LiDAT podataka (${neither.length})`,
+      note: 'Nema ni izdatnice ni zabilježene potrošnje u razdoblju.',
+      rows: neither,
+    },
+  ].filter((g) => g.rows.length > 0);
+}
+
+// The five info values for an excluded machine, in EXCLUDED_COLUMNS order.
+function excludedValues(m: MachineComparison): Array<string | number | null> {
+  return [
+    machineLabel(m),
+    m.rnalogs.join(', ') || '—',
+    hasMaris(m) ? round1(m.marisIssuedLitres) : null,
+    m.lidatConsumedLitres === null ? null : round1(m.lidatConsumedLitres),
+    m.lastReadingTime ? fmtDateTime(m.lastReadingTime) : 'Nikad',
+  ];
+}
+
 // The five activity values for one machine, in ACTIVITY_EXTRA_COLUMNS order.
 // Missing utilization (machine absent from the map) yields all-nulls.
 function activityValues(a: MachineUtilization | undefined): Array<number | null> {
@@ -69,6 +117,7 @@ export async function exportComparisonExcel(
   from: string,
   to: string,
   activity?: ActivityBySerial,
+  excluded?: MachineComparison[],
 ): Promise<void> {
   const XLSX = await import('xlsx');
 
@@ -108,7 +157,19 @@ export async function exportComparisonExcel(
     ],
   ];
 
-  const aoa = [...header, ...dataRows, ...footer];
+  // Machines the matched report left out, appended below the totals and split by
+  // which side is missing. Each group carries a one-line explanation.
+  const groups = excluded?.length ? groupExcluded(excluded) : [];
+  const excludedBlock: Array<Array<string | number | null>> = [];
+  if (groups.length > 0) {
+    excludedBlock.push([], [`STROJEVI BEZ OBA UNOSA (${excluded!.length})`]);
+    for (const g of groups) {
+      excludedBlock.push([], [g.title], [g.note], [...EXCLUDED_COLUMNS]);
+      for (const m of g.rows) excludedBlock.push(excludedValues(m));
+    }
+  }
+
+  const aoa = [...header, ...dataRows, ...footer, ...excludedBlock];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [
     { wch: 24 },
@@ -180,6 +241,7 @@ export async function exportComparisonPdf(
   from: string,
   to: string,
   activity?: ActivityBySerial,
+  excluded?: MachineComparison[],
 ): Promise<void> {
   const pdfMake = await loadPdfMake();
 
@@ -271,11 +333,68 @@ export async function exportComparisonPdf(
         },
         layout: zebraLayout,
       },
+      ...excludedSection(excluded),
     ],
     footer: pageFooter,
   };
 
   pdfMake.createPdf(doc).download(`${fileStem(from, to)}.pdf`);
+}
+
+// The "machines left out" appendix: one sub-table per reason, each preceded by a
+// heading and a plain-language note. Returns [] when nothing was excluded.
+function excludedSection(excluded: MachineComparison[] | undefined): any[] {
+  const groups = excluded?.length ? groupExcluded(excluded) : [];
+  if (groups.length === 0) return [];
+
+  const content: any[] = [
+    {
+      text: `Strojevi bez oba unosa (${excluded!.length})`,
+      fontSize: 12,
+      bold: true,
+      margin: [0, 18, 0, 2],
+      pageBreak: 'before',
+    },
+    {
+      text: 'Ovi strojevi nisu uključeni u usporedbu iznad jer im nedostaje jedna od dvije strane.',
+      color: '#555555',
+      margin: [0, 0, 0, 10],
+    },
+  ];
+
+  for (const g of groups) {
+    content.push(
+      { text: g.title, fontSize: 10, bold: true, margin: [0, 8, 0, 2] },
+      { text: g.note, color: '#555555', fontSize: 8, margin: [0, 0, 0, 4] },
+      {
+        table: {
+          headerRows: 1,
+          widths: ['*', 'auto', 'auto', 'auto', 'auto'],
+          body: [
+            [
+              headerCell('Stroj'),
+              headerCell('Radni nalog'),
+              headerCell('Maris izdano (L)', true),
+              headerCell('LiDAT potroš. (L)', true),
+              headerCell('Zadnji kontakt'),
+            ],
+            ...g.rows.map((m) => [
+              machineLabel(m),
+              m.rnalogs.join(', ') || '—',
+              { text: hasMaris(m) ? fmt(m.marisIssuedLitres, 1) : '—', alignment: 'right' },
+              {
+                text: m.lidatConsumedLitres === null ? '—' : fmt(m.lidatConsumedLitres, 1),
+                alignment: 'right',
+              },
+              m.lastReadingTime ? fmtDateTime(m.lastReadingTime) : 'Nikad',
+            ]),
+          ],
+        },
+        layout: zebraLayout,
+      },
+    );
+  }
+  return content;
 }
 
 // ---- Machine activity ("Iskorištenost po stroju") ----
@@ -288,7 +407,8 @@ const ACTIVITY_COLUMNS = [
   'Mjesto',
 ] as const;
 
-// Printed wherever place names appear — required by OpenStreetMap's licence.
+// OpenStreetMap's licence asks for attribution wherever place names are shown.
+// Kept in the Excel export; removed from the PDF at the user's request.
 const GEOCODE_ATTRIBUTION = 'Nazivi mjesta: © OpenStreetMap suradnici';
 
 // Machines silent this long get their last known position printed — for a
@@ -321,7 +441,7 @@ function positionText(p: { lat: number; lon: number } | null): string {
 }
 
 function activityLabel(m: MachineUtilization): string {
-  return labelWithPartial(m.model, m.serialNumber, m.partial);
+  return `${shortModel(m.model)} ${m.serialNumber}`;
 }
 
 // Last LiDAT contact, as a local-time timestamp; machines that never reported
@@ -450,9 +570,7 @@ export async function exportUtilizationPdf(
         margin: [0, 0, 0, 2],
       },
       {
-        text:
-          `Lokacija se prikazuje za strojeve bez signala ${LOCATION_AFTER_DAYS} dana ili dulje.` +
-          `     ·     ${GEOCODE_ATTRIBUTION}`,
+        text: `Lokacija se prikazuje za strojeve bez signala ${LOCATION_AFTER_DAYS} dana ili dulje.`,
         color: '#555555',
         margin: [0, 0, 0, 12],
       },

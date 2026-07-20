@@ -17,6 +17,7 @@ import {
   exportComparisonPdf,
   exportUtilizationExcel,
   exportUtilizationPdf,
+  groupExcluded,
   lastKnownPosition,
 } from '../export';
 import { reverseGeocode, type GeoPoint } from '../geocode';
@@ -111,6 +112,13 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
   const fuelMatchedRows = useMemo(() => fuelGroupRows.filter(hasBothEntries), [fuelGroupRows]);
   const fuelRows = scope === 'matched' ? fuelMatchedRows : fuelGroupRows;
 
+  // Machines the matched report leaves out. Only meaningful in 'matched' scope —
+  // the "svi strojevi" report already lists everything.
+  const fuelExcluded = useMemo(
+    () => (scope === 'matched' ? fuelGroupRows.filter((m) => !hasBothEntries(m)) : []),
+    [fuelGroupRows, scope],
+  );
+
   // Totals recomputed from exactly the rows going into the report, so the
   // summary block in the PDF/Excel matches its own table.
   const fuelReport: ComparisonResult | null = useMemo(() => {
@@ -204,7 +212,7 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
     try {
       if (isFuel && fuelReport) {
         const fn = format === 'pdf' ? exportComparisonPdf : exportComparisonExcel;
-        await fn(fuelRows, fuelReport, from, to, activityBySerial);
+        await fn(fuelRows, fuelReport, from, to, activityBySerial, fuelExcluded);
       } else if (!isFuel) {
         // Only the machines that actually print a position get looked up, and
         // cached hits cost nothing — so most runs make no network calls at all.
@@ -361,6 +369,16 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
                   <div className="value">{activityStats.never}</div>
                   <div className="sub">nema nijednog LiDAT očitanja</div>
                 </div>
+              </div>
+            )}
+
+            {isFuel && fuelExcluded.length > 0 && (
+              <div className="muted" style={{ marginBottom: 12 }}>
+                Izvještaj na kraju navodi i {fuelExcluded.length} strojeva bez oba unosa —{' '}
+                {groupExcluded(fuelExcluded)
+                  .map((g) => g.title)
+                  .join(' · ')}
+                .
               </div>
             )}
 
