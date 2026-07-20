@@ -1,6 +1,12 @@
 import type {
   AuthUser,
   ComparisonResult,
+  FormatChoice,
+  ReportLogEntry,
+  ReportRequest,
+  ReportRunResult,
+  ReportSubscription,
+  ReportType,
   HealthResponse,
   Machine,
   MachineGroup,
@@ -117,14 +123,47 @@ export const api = {
     send<Settings>('/api/settings', 'PUT', { fuelArticleCodes }),
   triggerSync: () => send<{ started: boolean }>('/api/sync', 'POST'),
 
-  // Mail a generated report. The file is built in the browser and posted as
-  // base64; the recipient is fixed server-side, not chosen here.
-  emailReport: (input: {
-    filename: string;
-    contentType: string;
-    contentBase64: string;
-    subject: string;
-    body?: string;
-    to?: string;
-  }) => send<{ ok: boolean; to: string }>('/api/reports/email', 'POST', input),
+  // ---- Reports ----
+  // The server builds the file for all three destinations (download, manual
+  // e-mail, monthly schedule), so they can't drift apart.
+  generateReport: async (input: ReportRequest): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${BASE}/api/reports/generate`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearToken();
+        onUnauthorized?.();
+      }
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error?.message ?? body.error ?? `Request failed (${res.status})`);
+    }
+    // Prefer the server's filename so downloads match the e-mailed attachment.
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const match = /filename="([^"]+)"/.exec(disposition);
+    return { blob: await res.blob(), filename: match?.[1] ?? 'izvjestaj' };
+  },
+
+  // `format` here may be 'both' — the server attaches one file of each.
+  emailReport: (input: Omit<ReportRequest, 'format'> & { format: FormatChoice; recipient?: string }) =>
+    send<{ ok: boolean; to: string }>('/api/reports/email', 'POST', input),
+
+  // ---- Report subscriptions (admin) ----
+  reportSubscriptions: () =>
+    get<{ subscriptions: ReportSubscription[]; log: ReportLogEntry[] }>('/api/report-subscriptions'),
+  saveSubscription: (input: {
+    userId: number;
+    reportType: ReportType;
+    format: FormatChoice;
+    active: boolean;
+  }) =>
+    send<{ subscription: ReportSubscription }>('/api/report-subscriptions', 'PUT', input).then(
+      (r) => r.subscription,
+    ),
+  deleteSubscription: (id: number) =>
+    send<{ ok: boolean }>(`/api/report-subscriptions/${id}`, 'DELETE'),
+  runSubscriptions: (dryRun: boolean) =>
+    send<ReportRunResult>('/api/report-subscriptions/run', 'POST', { dryRun }),
 };

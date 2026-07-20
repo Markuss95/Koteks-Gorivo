@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { initSchema, seedMachinesFromMapping } from './db/index.js';
 import { api } from './routes.js';
 import { runLidatSync } from './sync/lidatSync.js';
+import { runMonthlyReports } from './sync/reportSchedule.js';
 import { seedAdmin } from './services/users.js';
 
 function bootstrap(): void {
@@ -40,6 +41,25 @@ function bootstrap(): void {
     console.log(`[sync] scheduled with cron "${config.sync.cron}"`);
   } else {
     console.warn(`[sync] invalid cron expression: "${config.sync.cron}" — scheduler disabled`);
+  }
+
+  // Monthly automatic reports. The job runs daily and returns immediately unless
+  // today is the last working day of the month (see services/workdays.ts).
+  if (config.reports.enabled) {
+    if (cron.validate(config.reports.cron)) {
+      cron.schedule(config.reports.cron, () => {
+        runMonthlyReports()
+          .then((r) => {
+            if (r.ran) console.log('[reports] monthly run:', r);
+          })
+          .catch((err) => console.error('[reports] error:', err));
+      });
+      console.log(`[reports] monthly schedule active with cron "${config.reports.cron}"`);
+    } else {
+      console.warn(`[reports] invalid cron expression: "${config.reports.cron}" — disabled`);
+    }
+  } else {
+    console.log('[reports] monthly schedule disabled (REPORT_SCHEDULE_ENABLED=false)');
   }
 
   if (config.sync.onStart) {

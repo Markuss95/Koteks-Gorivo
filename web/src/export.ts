@@ -3,7 +3,7 @@
 // stroju"). Both libraries are lazy-imported so they only load when the user
 // exports.
 import type { ComparisonResult, Machine, MachineComparison, MachineUtilization } from './types';
-import { daysSince, fmt, fmtDate, fmtDateTime, shortModel } from './util';
+import { daysSince, fmt, fmtDate, fmtDateTime, fmtRange, shortModel } from './util';
 
 // dd.mm.yyyy for filenames — fmtDate's trailing dot is dropped, since a dot
 // immediately before the extension reads as a typo and Windows strips trailing
@@ -177,7 +177,7 @@ export async function exportComparisonExcel(
   const columns = activity ? [...COLUMNS, ...ACTIVITY_EXTRA_COLUMNS] : [...COLUMNS];
   const header = [
     ['Koteks Gorivo — Usporedba potrošnje goriva'],
-    [`Razdoblje: ${from} – ${to}`],
+    [`Razdoblje: ${fmtRange(from, to)}`],
     [`Eurodizel (artikl): ${data.fuelArticleCodes.join(', ')}`],
     [`Generirano: ${new Date().toLocaleString('hr-HR')}`],
     [],
@@ -372,7 +372,7 @@ export async function exportComparisonPdf(
     content: [
       { text: 'Koteks Gorivo — Usporedba potrošnje goriva', fontSize: 15, bold: true, margin: [0, 0, 0, 4] },
       {
-        text: `Razdoblje: ${from} – ${to}     ·     Eurodizel (artikl): ${data.fuelArticleCodes.join(', ')}`,
+        text: `Razdoblje: ${fmtRange(from, to)}     ·     Eurodizel (artikl): ${data.fuelArticleCodes.join(', ')}`,
         color: '#555555',
         margin: [0, 0, 0, 2],
       },
@@ -529,7 +529,7 @@ export async function exportUtilizationExcel(
 
   const header = [
     ['Koteks Gorivo — Izvještaj o aktivnosti strojeva'],
-    [`Razdoblje: ${from} – ${to}`],
+    [`Razdoblje: ${fmtRange(from, to)}`],
     [`Generirano: ${new Date().toLocaleString('hr-HR')}`],
     [
       `Lokacija se prikazuje za strojeve bez signala ${LOCATION_AFTER_DAYS} dana ili dulje.` +
@@ -618,7 +618,7 @@ export async function exportUtilizationPdf(
         bold: true,
         margin: [0, 0, 0, 4],
       },
-      { text: `Razdoblje: ${from} – ${to}`, color: '#555555', margin: [0, 0, 0, 2] },
+      { text: `Razdoblje: ${fmtRange(from, to)}`, color: '#555555', margin: [0, 0, 0, 2] },
       { text: `Generirano: ${new Date().toLocaleString('hr-HR')}`, color: '#555555', margin: [0, 0, 0, 12] },
       {
         text: `Strojeva: ${rows.length}     ·     Sortirano po zadnjem kontaktu (najnoviji prvi)`,

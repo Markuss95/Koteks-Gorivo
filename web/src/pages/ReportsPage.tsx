@@ -8,21 +8,11 @@ import type {
   MachineUtilization,
   UtilizationResult,
 } from '../types';
-import { daysSince, effectiveDateFloor, fmt, fmtDate, isStale, today } from '../util';
+import { daysSince, effectiveDateFloor, fmt, isStale, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
-import {
-  LOCATION_AFTER_DAYS,
-  exportComparisonExcel,
-  exportComparisonPdf,
-  exportUtilizationExcel,
-  exportUtilizationPdf,
-  groupExcluded,
-  lastKnownPosition,
-  type Delivery,
-  type ReportFile,
-} from '../export';
-import { reverseGeocode, type GeoPoint } from '../geocode';
+import { LOCATION_AFTER_DAYS, groupExcluded } from '../export';
+import { ReportSubscriptions } from '../components/ReportSubscriptions';
 
 // Same fallback floor as the comparison page until the backend reports its own.
 const MIN_DATE_FALLBACK = '2026-05-27';
@@ -31,23 +21,9 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 // the report prints a machine's last known location (see LOCATION_AFTER_DAYS).
 const STALE_DAYS = LOCATION_AFTER_DAYS;
 
-// FileReader gives us base64 without blowing the call stack on large files, which
-// String.fromCharCode(...bytes) would do.
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Čitanje datoteke nije uspjelo.'));
-    reader.onload = () => {
-      const result = String(reader.result);
-      // Strip the "data:<mime>;base64," prefix — Graph wants raw base64.
-      resolve(result.slice(result.indexOf(',') + 1));
-    };
-    reader.readAsDataURL(blob);
-  });
-}
-
 type ReportType = 'fuel' | 'activity';
-type Format = 'pdf' | 'excel';
+// 'both' downloads one file of each / attaches both to a single e-mail.
+type Format = 'pdf' | 'excel' | 'both';
 type Scope = 'matched' | 'all';
 
 // A machine "has both entries" when Maris issued fuel for it AND LiDAT reported
@@ -94,9 +70,6 @@ export function ReportsPage({
   const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  // Reverse-geocoding progress; the lookups are rate-limited to 1/s, so a first
-  // run over many machines takes a while and needs to say so.
-  const [geoProgress, setGeoProgress] = useState<{ done: number; total: number } | null>(null);
   const [sending, setSending] = useState(false);
   // Address the last report actually went to, echoed back by the server.
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -201,13 +174,6 @@ export function ReportsPage({
     return (t.differenceLitres / t.lidatConsumedLitres) * 100;
   }, [fuelReport]);
 
-  // Utilization keyed by serial, so the fuel report can carry the activity
-  // columns for each of its machines.
-  const activityBySerial = useMemo(
-    () => new Map((activityData?.machines ?? []).map((m) => [m.serialNumber, m])),
-    [activityData],
-  );
-
   // Machine records keyed by serial, for the activity report's location column.
   const machineBySerial = useMemo(
     () => new Map(machines.map((m) => [m.serialNumber, m])),
@@ -252,42 +218,44 @@ export function ReportsPage({
   const rowCount = isFuel ? fuelRows.length : activityRows.length;
   const ready = isFuel ? fuelReport !== null : activityData !== null;
 
-  // Builds the report exactly once, for either destination — so what lands in the
-  // inbox is byte-identical to what the download button produces.
-  const buildReport = async (delivery: Delivery): Promise<ReportFile | null> => {
-    if (isFuel && fuelReport) {
-      const fn = format === 'pdf' ? exportComparisonPdf : exportComparisonExcel;
-      return fn(fuelRows, fuelReport, from, to, activityBySerial, fuelExcluded, delivery);
-    }
-    if (!isFuel) {
-      // Only the machines that actually print a position get looked up, and
-      // cached hits cost nothing — so most runs make no network calls at all.
-      const points: GeoPoint[] = [];
-      for (const m of activityRows) {
-        const pos = lastKnownPosition(m, machineBySerial);
-        if (pos) points.push({ serialNumber: m.serialNumber, lat: pos.lat, lon: pos.lon });
-      }
-      const places = await reverseGeocode(points, (done, total) =>
-        setGeoProgress(total > 0 && done < total ? { done, total } : null),
-      );
-      setGeoProgress(null);
-      const fn = format === 'pdf' ? exportUtilizationPdf : exportUtilizationExcel;
-      return fn(activityRows, from, to, machineBySerial, places, delivery);
-    }
-    return null;
-  };
+  // Everything below asks the server to build the file. One implementation
+  // serves the download button, the manual e-mail and the monthly schedule, so
+  // all three produce identical reports.
+  const reportRequest = (fileFormat: 'pdf' | 'excel') => ({
+    type: reportType,
+    format: fileFormat,
+    from,
+    to,
+    scope: isFuel ? scope : undefined,
+    groups: [...groups],
+  });
+
+  // 'both' means two files; every other choice means one.
+  const chosenFormats = (): Array<'pdf' | 'excel'> =>
+    format === 'both' ? ['pdf', 'excel'] : [format];
 
   const generate = async () => {
     if (rowCount === 0) return;
     setGenerating(true);
     setError(null);
     try {
-      await buildReport('download');
+      // Sequential, not parallel: two simultaneous downloads trip browser
+      // pop-up blocking, and the fuel report is heavy to build anyway.
+      for (const f of chosenFormats()) {
+        const { blob, filename } = await api.generateReport(reportRequest(f));
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
     } catch (e) {
       setError(`Izrada izvještaja nije uspjela: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setGenerating(false);
-      setGeoProgress(null);
     }
   };
 
@@ -300,23 +268,13 @@ export function ReportsPage({
     setError(null);
     setSentTo(null);
     try {
-      const file = await buildReport('file');
-      if (!file) throw new Error('Izvještaj nije izrađen.');
-      const title = isFuel ? 'Izvještaj o potrošnji goriva' : 'Izvještaj o aktivnosti strojeva';
-      const res = await api.emailReport({
-        filename: file.filename,
-        contentType: file.contentType,
-        contentBase64: await blobToBase64(file.blob),
-        subject: `${title} · ${fmtDate(from)} – ${fmtDate(to)}`,
-        body: `U prilogu je ${title.toLowerCase()} za razdoblje ${fmtDate(from)} – ${fmtDate(to)}.`,
-        to: sendTo,
-      });
+      // One message carries both attachments when 'both' is selected.
+      const res = await api.emailReport({ ...reportRequest('pdf'), format, recipient: sendTo });
       setSentTo(res.to);
     } catch (e) {
       setError(`Slanje e-pošte nije uspjelo: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSending(false);
-      setGeoProgress(null);
     }
   };
 
@@ -343,6 +301,7 @@ export function ReportsPage({
           <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
             <option value="pdf">PDF</option>
             <option value="excel">Excel (.xlsx)</option>
+            <option value="both">PDF i Excel</option>
           </select>
         </div>
         {/* The Maris/LiDAT pairing only means something for the fuel report. */}
@@ -374,11 +333,7 @@ export function ReportsPage({
               onClick={generate}
               disabled={loading || generating || sending || !ready || rowCount === 0}
             >
-              {geoProgress && !sending
-                ? `Dohvaćanje lokacija… (${geoProgress.done}/${geoProgress.total})`
-                : generating
-                  ? 'Izrada…'
-                  : 'Generiraj izvještaj'}
+              {generating ? 'Izrada…' : 'Generiraj izvještaj'}
             </button>
             {/* Admin-only. The server enforces this too — see POST /reports/email. */}
             {isAdmin && (
@@ -387,11 +342,7 @@ export function ReportsPage({
                 onClick={() => setRecipient(defaultMailTo)}
                 disabled={loading || generating || sending || !ready || rowCount === 0}
               >
-                {geoProgress && sending
-                  ? `Dohvaćanje lokacija… (${geoProgress.done}/${geoProgress.total})`
-                  : sending
-                    ? 'Slanje…'
-                    : 'Pošalji e-poštom'}
+                {sending ? 'Slanje…' : 'Pošalji e-poštom'}
               </button>
             )}
           </div>
@@ -489,6 +440,8 @@ export function ReportsPage({
           </>
         )}
       </div>
+
+      {isAdmin && <ReportSubscriptions />}
 
       {recipient !== null && (
         <RecipientDialog

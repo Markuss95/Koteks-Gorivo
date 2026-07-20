@@ -103,6 +103,39 @@ export function initSchema(): void {
       machines_failed INTEGER NOT NULL DEFAULT 0,
       message      TEXT
     );
+
+    -- Reverse-geocoded place names, keyed by coordinates rounded to ~11 m.
+    -- OpenStreetMap's usage policy asks that results be cached rather than
+    -- re-fetched, and this survives restarts (the browser's localStorage did not).
+    CREATE TABLE IF NOT EXISTS geocode_cache (
+      coord_key  TEXT PRIMARY KEY,   -- 'lat,lon' to 4dp
+      place_name TEXT NOT NULL,
+      fetched_at TEXT NOT NULL
+    );
+
+    -- Who receives which report automatically, on the last working day of each month.
+    CREATE TABLE IF NOT EXISTS report_subscription (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+      report_type TEXT NOT NULL,               -- 'fuel' | 'activity'
+      format      TEXT NOT NULL DEFAULT 'pdf', -- 'pdf' | 'excel'
+      active      INTEGER NOT NULL DEFAULT 1,
+      created_at  TEXT NOT NULL,
+      UNIQUE (user_id, report_type)            -- one row per user per report kind
+    );
+
+    -- One row per scheduled send attempt, so failures are visible rather than silent.
+    CREATE TABLE IF NOT EXISTS report_log (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ran_at        TEXT NOT NULL,
+      period_from   TEXT NOT NULL,
+      period_to     TEXT NOT NULL,
+      recipient     TEXT NOT NULL,
+      report_type   TEXT NOT NULL,
+      format        TEXT NOT NULL,
+      status        TEXT NOT NULL,             -- success | error
+      message       TEXT
+    );
   `);
 
   // Migrate older databases that predate the Location columns on `machine`.

@@ -17,6 +17,17 @@ import {
   isMailConfigured,
   sendMail,
 } from './services/mailer.js';
+import {
+  deleteSubscription,
+  listSubscriptions,
+  recentReportLog,
+  upsertSubscription,
+} from './services/subscriptions.js';
+import { buildReport, reportTitle } from './services/reports/index.js';
+import { expandFormats } from './services/reports/select.js';
+import { fmtDate } from './services/reports/format.js';
+import { runMonthlyReports } from './sync/reportSchedule.js';
+import type { MachineGroup } from './services/groups.js';
 
 export const api = Router();
 
@@ -376,14 +387,18 @@ api.delete('/users/:id', adminOnly, (req, res) => {
 // it here as base64; the server attaches it and sends via Microsoft Graph. The
 // recipient is fixed in config for now — no address is accepted from the client,
 // so this endpoint can't be used to mail arbitrary people.
+// The server builds the file itself now — the client sends only the report
+// parameters, never an attachment.
 const emailReportSchema = z.object({
-  filename: z.string().min(1).max(200),
-  contentType: z.string().min(1).max(200),
-  contentBase64: z.string().min(1),
-  subject: z.string().min(1).max(300),
-  body: z.string().max(4000).optional(),
+  type: z.enum(['fuel', 'activity']),
+  // 'both' attaches one PDF and one Excel to the same message.
+  format: z.enum(['pdf', 'excel', 'both']),
+  from: dateSchema,
+  to: dateSchema,
+  scope: z.enum(['matched', 'all']).optional(),
+  groups: z.array(z.enum(['osijek', 'velicki', 'psunj'])).min(1).optional(),
   // Recipient chosen by the admin in the UI. Omitted → the configured default.
-  to: z.string().email('Neispravna e-mail adresa').max(320).optional(),
+  recipient: z.string().email('Neispravna e-mail adresa').max(320).optional(),
 });
 
 /**
@@ -408,25 +423,14 @@ api.post('/reports/email', adminOnly, async (req, res) => {
     res.status(400).json({ error: parse.error.flatten() });
     return;
   }
-  const { filename, contentType, contentBase64, subject, body, to: requestedTo } = parse.data;
+  const { type, format, from, to, scope, recipient } = parse.data;
 
-  // Size first: "too big" is a property of the request, so it should answer the
-  // same way whether or not mail happens to be configured. Also keeps Graph from
-  // failing later with a far less obvious error.
-  const rawBytes = Math.floor((contentBase64.length * 3) / 4);
-  if (rawBytes > MAX_ATTACHMENT_BYTES) {
-    res.status(413).json({
-      error: `Izvještaj je prevelik za slanje e-poštom (${(rawBytes / 1024 / 1024).toFixed(1)} MB, ograničenje ${(MAX_ATTACHMENT_BYTES / 1024 / 1024).toFixed(1)} MB).`,
-    });
-    return;
-  }
-
-  // Recipient is validated before the configuration check, for the same reason
-  // as the size guard: it's a property of the request, so it must answer the
-  // same way whether or not mail happens to be configured. Checked on the
-  // address actually used, so a misconfigured MAIL_TO can't bypass the allowlist.
-  const to = requestedTo ?? config.mail.defaultTo;
-  if (!recipientDomainAllowed(to)) {
+  // Recipient is validated before the configuration check: it's a property of
+  // the request, so it must answer the same way whether or not mail happens to
+  // be configured. Checked on the address actually used, so a misconfigured
+  // MAIL_TO can't bypass the allowlist.
+  const address = recipient ?? config.mail.defaultTo;
+  if (!recipientDomainAllowed(address)) {
     res.status(400).json({
       error: `Slanje je dopušteno samo na domene: ${config.mail.allowedDomains.join(', ')}.`,
     });
@@ -438,17 +442,134 @@ api.post('/reports/email', adminOnly, async (req, res) => {
     return;
   }
 
+  const groups = resolveGroups(req as AuthedRequest, parse.data.groups as MachineGroup[] | undefined);
+  if (groups.length === 0) {
+    res.status(403).json({ error: 'Nemate pristup odabranim grupama' });
+    return;
+  }
+
   try {
+    const reports = [];
+    for (const f of expandFormats(format)) {
+      reports.push(await buildReport({ type, format: f, from, to, groups, scope }));
+    }
+
+    // Graph caps the whole request, so the check is on the combined size.
+    const totalBytes = reports.reduce((sum, r) => sum + r.buffer.length, 0);
+    if (totalBytes > MAX_ATTACHMENT_BYTES) {
+      res.status(413).json({
+        error: `Izvještaj je prevelik za slanje e-poštom (${(totalBytes / 1024 / 1024).toFixed(1)} MB, ograničenje ${(MAX_ATTACHMENT_BYTES / 1024 / 1024).toFixed(1)} MB).`,
+      });
+      return;
+    }
+
+    const title = reportTitle(type);
     await sendMail({
-      to: [to],
-      subject,
-      text: body ?? 'U prilogu se nalazi izvještaj iz aplikacije Koteks Gorivo.',
-      attachments: [{ filename, contentType, contentBase64 }],
+      to: [address],
+      subject: `${title} · ${fmtDate(from)} – ${fmtDate(to)}`,
+      text: `U prilogu je ${title.toLowerCase()} za razdoblje ${fmtDate(from)} – ${fmtDate(to)}.`,
+      attachments: reports.map((r) => ({
+        filename: r.filename,
+        contentType: r.contentType,
+        contentBase64: r.buffer.toString('base64'),
+      })),
     });
-    console.log(`[mail] report "${filename}" sent to ${to} by ${(req as AuthedRequest).user?.username}`);
-    res.json({ ok: true, to });
+    console.log(`[mail] report "${reports.map((r) => r.filename).join(', ')}" sent to ${address} by ${(req as AuthedRequest).user?.username}`);
+    res.json({ ok: true, to: address });
   } catch (err) {
     console.error('[mail] send failed:', err);
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ---- Report subscriptions (admin) ----
+const subscriptionSchema = z.object({
+  userId: z.number().int().positive(),
+  reportType: z.enum(['fuel', 'activity']),
+  format: z.enum(['pdf', 'excel', 'both']),
+  active: z.boolean(),
+});
+
+api.get('/report-subscriptions', adminOnly, (_req, res) => {
+  res.json({ subscriptions: listSubscriptions(), log: recentReportLog(20) });
+});
+
+api.put('/report-subscriptions', adminOnly, (req, res) => {
+  const parse = subscriptionSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  try {
+    res.json({ subscription: upsertSubscription(parse.data) });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+api.delete('/report-subscriptions/:id', adminOnly, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: 'Neispravan ID' });
+    return;
+  }
+  deleteSubscription(id);
+  res.json({ ok: true });
+});
+
+/**
+ * Manual trigger for the monthly run, so an admin can verify the whole pipeline
+ * without waiting for month end. `dryRun` builds everything and sends nothing.
+ */
+api.post('/report-subscriptions/run', adminOnly, async (req, res) => {
+  const dryRun = req.body?.dryRun === true;
+  try {
+    const result = await runMonthlyReports({ force: true, dryRun });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ---- Server-side report generation ----
+// One code path for the download button, the manual e-mail and the monthly
+// schedule, so all three produce identical files.
+const buildSchema = z.object({
+  type: z.enum(['fuel', 'activity']),
+  format: z.enum(['pdf', 'excel']),
+  from: dateSchema,
+  to: dateSchema,
+  scope: z.enum(['matched', 'all']).optional(),
+  groups: z.array(z.enum(['osijek', 'velicki', 'psunj'])).min(1).optional(),
+});
+
+/** Groups the caller may see, intersected with any they explicitly asked for. */
+function resolveGroups(req: AuthedRequest, requested?: MachineGroup[]): MachineGroup[] {
+  const allowed = req.user?.allowedGroups ?? [];
+  if (!requested) return allowed;
+  return requested.filter((g) => allowed.includes(g));
+}
+
+api.post('/reports/generate', async (req, res) => {
+  const parse = buildSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  const groups = resolveGroups(req as AuthedRequest, parse.data.groups as MachineGroup[] | undefined);
+  if (groups.length === 0) {
+    res.status(403).json({ error: 'Nemate pristup odabranim grupama' });
+    return;
+  }
+  try {
+    const report = await buildReport({ ...parse.data, groups });
+    res.setHeader('Content-Type', report.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
+    // Lets the browser read the filename despite CORS.
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+    res.send(report.buffer);
+  } catch (err) {
+    console.error('[reports] generate failed:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

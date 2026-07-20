@@ -187,6 +187,62 @@ export interface MachineSeries {
   }>;
 }
 
+export type ReportType = 'fuel' | 'activity';
+/** A single produced file. */
+export type ReportFormat = 'pdf' | 'excel';
+/** What the user picked — 'both' produces one file of each. */
+export type FormatChoice = ReportFormat | 'both';
+export type FuelScope = 'matched' | 'all';
+
+/** Parameters the server needs to build a report — no file content crosses the wire. */
+export interface ReportRequest {
+  type: ReportType;
+  format: ReportFormat;
+  from: string;
+  to: string;
+  scope?: FuelScope;
+  groups?: MachineGroup[];
+}
+
+export interface ReportSubscription {
+  id: number;
+  userId: number;
+  username: string;
+  reportType: ReportType;
+  format: FormatChoice;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ReportLogEntry {
+  id: number;
+  ran_at: string;
+  period_from: string;
+  period_to: string;
+  recipient: string;
+  report_type: string;
+  format: string;
+  status: string;
+  message: string | null;
+}
+
+export interface ReportRunResult {
+  ran: boolean;
+  reason?: string;
+  from?: string;
+  to?: string;
+  sent: number;
+  failed: number;
+  skipped: number;
+  details: Array<{
+    recipient: string;
+    type: string;
+    format: string;
+    status: string;
+    message?: string;
+  }>;
+}
+
 export interface Settings {
   fuelArticleCodes: string[];
   syncCron: string;

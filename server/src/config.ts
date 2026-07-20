@@ -122,6 +122,20 @@ export const config = {
     saveToSentItems: optional('MAIL_SAVE_TO_SENT', 'true').toLowerCase() === 'true',
   },
 
+  // Monthly automatic reports (see services/workdays.ts + sync/reportSchedule.ts).
+  reports: {
+    // Daily check; the run only proceeds if that day is the last working day of
+    // the month. Kept early enough that the mail is waiting in the morning.
+    cron: optional('REPORT_CRON', '0 6 * * *'),
+    enabled: optional('REPORT_SCHEDULE_ENABLED', 'true').toLowerCase() === 'true',
+    // Extra non-working days beyond the statutory Croatian holidays, as
+    // comma-separated YYYY-MM-DD (e.g. a collective shutdown).
+    extraHolidays: optional('REPORT_EXTRA_HOLIDAYS', '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
+
   auth: {
     // Secret for signing JWTs. A dev fallback keeps local setup frictionless;
     // production MUST set JWT_SECRET (warned at boot in index.ts).

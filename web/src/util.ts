@@ -79,6 +79,16 @@ export function fmtDate(iso: string): string {
   return m ? `${m[3]}.${m[2]}.${m[1]}.` : iso;
 }
 
+/**
+ * Period line shown inside reports, e.g. '04.06.2026 – 20.07.2026'. Uses the
+ * same dot-free form as the filename so a report and its file agree on sight.
+ * (The e-mail subject keeps fmtDate's trailing dot — see ReportsPage.)
+ */
+export function fmtRange(from: string, to: string): string {
+  const noDot = (iso: string) => fmtDate(iso).replace(/\.$/, '');
+  return `${noDot(from)} – ${noDot(to)}`;
+}
+
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
