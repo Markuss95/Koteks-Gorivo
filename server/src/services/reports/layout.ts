@@ -14,9 +14,6 @@ export const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const PDF_MIME = 'application/pdf';
 
-// Machines silent this long get their last known position printed — for a
-// machine that reported this morning the location is just noise.
-export const LOCATION_AFTER_DAYS = 20;
 
 export type MachineBySerial = Map<string, Machine>;
 export type ActivityBySerial = Map<string, MachineUtilization>;
@@ -48,13 +45,14 @@ function n1(v: number | null): number | null {
   return v === null ? null : round1(v);
 }
 
+/**
+ * Last known position of a machine, for every machine that has one on file.
+ * Returns null only when no coordinates were ever recorded.
+ */
 export function lastKnownPosition(
   m: MachineUtilization,
   machines: MachineBySerial | undefined,
 ): { lat: number; lon: number } | null {
-  const days = daysSince(m.lastReadingTime);
-  // null days = never reported; those count as silent.
-  if (days !== null && days < LOCATION_AFTER_DAYS) return null;
   const rec = machines?.get(m.serialNumber);
   if (!rec || rec.latitude == null || rec.longitude == null) return null;
   return { lat: rec.latitude, lon: rec.longitude };
@@ -407,10 +405,7 @@ export function buildActivityExcel(input: ActivityReportInput): Buffer {
     ['Koteks Gorivo — Izvještaj o aktivnosti strojeva'],
     [`Razdoblje: ${fmtRange(from, to)}`],
     [`Generirano: ${new Date().toLocaleString('hr-HR')}`],
-    [
-      `Lokacija se prikazuje za strojeve bez signala ${LOCATION_AFTER_DAYS} dana ili dulje.` +
-        '    Nazivi mjesta: © OpenStreetMap suradnici',
-    ],
+    ['Nazivi mjesta: © OpenStreetMap suradnici'],
     [],
     [...ACTIVITY_COLUMNS],
   ];
@@ -483,11 +478,6 @@ export function buildActivityPdf(input: ActivityReportInput): Promise<Buffer> {
       { text: `Generirano: ${new Date().toLocaleString('hr-HR')}`, color: '#555555', margin: [0, 0, 0, 2] },
       {
         text: `Strojeva: ${rows.length}     ·     Sortirano po zadnjem kontaktu (najnoviji prvi)`,
-        color: '#555555',
-        margin: [0, 0, 0, 2],
-      },
-      {
-        text: `Lokacija se prikazuje za strojeve bez signala ${LOCATION_AFTER_DAYS} dana ili dulje.`,
         color: '#555555',
         margin: [0, 0, 0, 12],
       },

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type {
   ComparisonResult,
-  Machine,
   MachineComparison,
   MachineGroup,
   MachineUtilization,
@@ -11,15 +10,15 @@ import type {
 import { daysSince, effectiveDateFloor, fmt, isStale, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
-import { LOCATION_AFTER_DAYS, groupExcluded } from '../export';
+import { groupExcluded } from '../export';
 import { ReportSubscriptions } from '../components/ReportSubscriptions';
 
 // Same fallback floor as the comparison page until the backend reports its own.
 const MIN_DATE_FALLBACK = '2026-05-27';
 
-// Silence threshold for this report's headline card. Also the cutoff at which
-// the report prints a machine's last known location (see LOCATION_AFTER_DAYS).
-const STALE_DAYS = LOCATION_AFTER_DAYS;
+// Silence threshold for this report's headline card. Independent of the report's
+// location column, which now covers every machine.
+const STALE_DAYS = 20;
 
 type ReportType = 'fuel' | 'activity';
 // 'both' downloads one file of each / attaches both to a single e-mail.
@@ -67,7 +66,6 @@ export function ReportsPage({
 
   const [fuelData, setFuelData] = useState<ComparisonResult | null>(null);
   const [activityData, setActivityData] = useState<UtilizationResult | null>(null);
-  const [machines, setMachines] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
@@ -87,12 +85,6 @@ export function ReportsPage({
         setDefaultMailTo(s.mailTo ?? '');
         setAllowedDomains(s.mailAllowedDomains ?? []);
       })
-      .catch(() => {});
-    // The machine list carries the last known position; it isn't date-dependent,
-    // so it's fetched once. A failure only costs the location column.
-    api
-      .machines()
-      .then(setMachines)
       .catch(() => {});
   }, []);
 
@@ -174,12 +166,6 @@ export function ReportsPage({
     return (t.differenceLitres / t.lidatConsumedLitres) * 100;
   }, [fuelReport]);
 
-  // Machine records keyed by serial, for the activity report's location column.
-  const machineBySerial = useMemo(
-    () => new Map(machines.map((m) => [m.serialNumber, m])),
-    [machines],
-  );
-
   // ---- Activity report rows ----
   // Every machine in the group is listed, including ones that reported nothing in
   // the period — those are exactly the machines this report is meant to surface.
@@ -200,19 +186,12 @@ export function ReportsPage({
   const activityStats = useMemo(() => {
     const days = activityRows.map((m) => daysSince(m.lastReadingTime));
     const seen = days.filter((d): d is number => d !== null);
-    const stale = activityRows.filter((m) => isStale(m.lastReadingTime, STALE_DAYS));
     return {
       never: days.length - seen.length,
-      stale: stale.length,
-      // How many silent machines will actually print coordinates — the rest have
-      // no position on file at all.
-      staleLocated: stale.filter((m) => {
-        const rec = machineBySerial.get(m.serialNumber);
-        return rec?.latitude != null && rec?.longitude != null;
-      }).length,
+      stale: activityRows.filter((m) => isStale(m.lastReadingTime, STALE_DAYS)).length,
       worst: seen.length ? Math.floor(Math.max(...seen)) : null,
     };
-  }, [activityRows, machineBySerial]);
+  }, [activityRows]);
 
   const isFuel = reportType === 'fuel';
   const rowCount = isFuel ? fuelRows.length : activityRows.length;
@@ -403,9 +382,7 @@ export function ReportsPage({
                   <div className={`value ${activityStats.stale > 0 ? 'neg' : 'pos'}`}>
                     {activityStats.stale}
                   </div>
-                  <div className="sub">
-                    {activityStats.staleLocated} s poznatom lokacijom u izvještaju
-                  </div>
+                  <div className="sub">uključuje one koji se nikad nisu javili</div>
                 </div>
                 <div className="card">
                   <div className="label">Najdulje bez signala</div>
