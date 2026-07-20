@@ -238,6 +238,8 @@ export interface ReportRunResult {
     recipient: string;
     type: string;
     format: string;
+    // Worksite the entry refers to; one mail is sent per group.
+    group: string;
     status: string;
     message?: string;
   }>;

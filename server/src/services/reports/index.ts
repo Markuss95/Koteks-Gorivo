@@ -4,7 +4,7 @@
 import { buildComparison, getFuelArticleCodes } from '../comparison.js';
 import { buildUtilization } from '../utilization.js';
 import { listMachines } from '../machines.js';
-import type { MachineGroup } from '../groups.js';
+import { GROUP_LABELS, type MachineGroup } from '../groups.js';
 import { selectActivity, selectFuel, type FuelScope, type ReportFormat, type ReportType } from './select.js';
 import { reverseGeocode, type GeoPoint } from './geocode.js';
 import {
@@ -42,6 +42,13 @@ export interface BuiltReport {
   buffer: Buffer;
   /** Rows actually included — callers use it to avoid mailing an empty report. */
   rowCount: number;
+  /** Worksite name when the report covers exactly one; null when it spans several. */
+  groupLabel: string | null;
+}
+
+/** A report for a single worksite names it; one spanning several does not. */
+function soleGroup(groups: MachineGroup[]): MachineGroup | null {
+  return groups.length === 1 ? groups[0] : null;
 }
 
 /** Human-readable report name, used in e-mail subjects. */
@@ -70,11 +77,13 @@ export async function buildReport(opts: BuildReportOptions): Promise<BuiltReport
       activity,
     };
     const buffer = format === 'pdf' ? await buildFuelPdf(input) : buildFuelExcel(input);
+    const only = soleGroup(groups);
     return {
-      filename: `${fileStem(from, to, 'gorivo')}.${format === 'pdf' ? 'pdf' : 'xlsx'}`,
+      filename: `${fileStem(from, to, 'gorivo', only ?? undefined)}.${format === 'pdf' ? 'pdf' : 'xlsx'}`,
       contentType: format === 'pdf' ? PDF_MIME : XLSX_MIME,
       buffer,
       rowCount: selection.rows.length,
+      groupLabel: only ? GROUP_LABELS[only] : null,
     };
   }
 
@@ -98,10 +107,12 @@ export async function buildReport(opts: BuildReportOptions): Promise<BuiltReport
 
   const input = { rows, from, to, machines, places };
   const buffer = format === 'pdf' ? await buildActivityPdf(input) : buildActivityExcel(input);
+  const only = soleGroup(groups);
   return {
-    filename: `${fileStem(from, to, 'aktivnost')}.${format === 'pdf' ? 'pdf' : 'xlsx'}`,
+    filename: `${fileStem(from, to, 'aktivnost', only ?? undefined)}.${format === 'pdf' ? 'pdf' : 'xlsx'}`,
     contentType: format === 'pdf' ? PDF_MIME : XLSX_MIME,
     buffer,
     rowCount: rows.length,
+    groupLabel: only ? GROUP_LABELS[only] : null,
   };
 }

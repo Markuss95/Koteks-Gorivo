@@ -464,10 +464,16 @@ api.post('/reports/email', adminOnly, async (req, res) => {
     }
 
     const title = reportTitle(type);
+    // Name the worksite when the report covers exactly one, matching the
+    // subjects the monthly schedule sends.
+    const site = reports[0].groupLabel;
+    const subject = site
+      ? `${title} · ${site} · ${fmtDate(from)} – ${fmtDate(to)}`
+      : `${title} · ${fmtDate(from)} – ${fmtDate(to)}`;
     await sendMail({
       to: [address],
-      subject: `${title} · ${fmtDate(from)} – ${fmtDate(to)}`,
-      text: `U prilogu je ${title.toLowerCase()} za razdoblje ${fmtDate(from)} – ${fmtDate(to)}.`,
+      subject,
+      text: `U prilogu je ${title.toLowerCase()}${site ? ` za ${site}` : ''}, razdoblje ${fmtDate(from)} – ${fmtDate(to)}.`,
       attachments: reports.map((r) => ({
         filename: r.filename,
         contentType: r.contentType,

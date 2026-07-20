@@ -5,6 +5,13 @@ export type MachineGroup = 'osijek' | 'velicki' | 'psunj';
 
 export const GROUP_KEYS: MachineGroup[] = ['osijek', 'velicki', 'psunj'];
 
+/** Croatian worksite names, matching the labels shown in the web app. */
+export const GROUP_LABELS: Record<MachineGroup, string> = {
+  osijek: 'Osijek Koteks',
+  velicki: 'Velički Kamen',
+  psunj: 'Kamen Psunj',
+};
+
 const VELICKI_KAMEN = new Set([
   '4M/325', '4M/344', '4M/348', '4M/313', '4M/327', '4M/355', '4M/322', '4M/350',
   '4M/351', '4M/341', '4M/316', '4M/359', '4M/361', '4M/366', '4V/340', '4M/365', '4M/367',

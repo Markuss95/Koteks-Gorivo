@@ -62,6 +62,29 @@ services:
       - key: CORS_ORIGIN
         sync: false
 
+      # ---- E-mail (Microsoft Graph) + automatic monthly reports ----
+      # Tenant and client IDs are public identifiers (they appear in OAuth URLs),
+      # so they live here; only the client secret is entered in the dashboard.
+      - key: GRAPH_TENANT_ID
+        value: 447dfde3-8b10-4752-9a23-7a947fa4c21e
+      - key: GRAPH_CLIENT_ID
+        value: c68c0d3b-a5b0-46b1-86d1-3848505de459
+      - key: GRAPH_CLIENT_SECRET
+        sync: false
+      - key: MAIL_FROM
+        value: noreply@osijek-koteks.hr
+      - key: MAIL_TO
+        value: marko.krajina@osijek-koteks.hr
+      - key: MAIL_SAVE_TO_SENT
+        value: "true"
+      - key: MAIL_ALLOWED_DOMAINS
+        value: "osijek-koteks.hr,velicki-kamen.hr,kamen-psunj.hr,abgtest.hr,molaris.hr,prodorina.hr,r-promet.hr"
+      # Daily check; only the last working day of the month actually sends.
+      - key: REPORT_CRON
+        value: "0 6 * * *"
+      - key: REPORT_SCHEDULE_ENABLED
+        value: "true"
+
       # Auth — secret for signing login tokens (long random string) and the first
       # admin, created on first boot when no users exist yet.
       - key: JWT_SECRET

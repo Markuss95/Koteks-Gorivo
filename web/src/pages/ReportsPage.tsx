@@ -8,6 +8,7 @@ import type {
   UtilizationResult,
 } from '../types';
 import { daysSince, effectiveDateFloor, fmt, isStale, today } from '../util';
+import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { groupExcluded } from '../export';
@@ -56,8 +57,8 @@ export function ReportsPage({
     allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek',
   ];
   const [reportType, setReportType] = useState<ReportType>('fuel');
-  const [from, setFrom] = useState(() => effectiveDateFloor(MIN_DATE_FALLBACK, initialGroups));
-  const [to, setTo] = useState(today());
+  // Shared across the reporting pages — see DateRangeContext.
+  const { from, to, setFrom, setTo } = useDateRange();
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [groups, setGroups] = useState<Set<MachineGroup>>(() => new Set(initialGroups));
   const [format, setFormat] = useState<Format>('pdf');

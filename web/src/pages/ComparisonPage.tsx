@@ -13,6 +13,7 @@ import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
 import { effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
+import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { StaleLegend } from '../components/StaleLegend';
@@ -35,8 +36,8 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
   ];
   // Start `from` at the group-aware floor so the very first fetch already uses the
   // correct range (a Velički/Psunj-only user must start at 26 Jun, not 4 Jun).
-  const [from, setFrom] = useState(() => effectiveDateFloor(MIN_DATE_FALLBACK, initialGroups));
-  const [to, setTo] = useState(today());
+  // Shared across the reporting pages — see DateRangeContext.
+  const { from, to, setFrom, setTo } = useDateRange();
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [data, setData] = useState<ComparisonResult | null>(null);
   const [loading, setLoading] = useState(false);

@@ -8,6 +8,7 @@ import { UsersPage } from './pages/UsersPage';
 import { LoginPage } from './pages/LoginPage';
 import { UtilizationPage } from './pages/UtilizationPage';
 import { StaleMachinesPage } from './pages/StaleMachinesPage';
+import { DateRangeProvider } from './DateRangeContext';
 import { ReportsPage } from './pages/ReportsPage';
 
 type Tab = 'comparison' | 'utilization' | 'machines' | 'stale' | 'reports' | 'settings' | 'users';
@@ -124,6 +125,8 @@ export function App() {
       </header>
 
       <main>
+        {/* One date range shared by every reporting page. */}
+        <DateRangeProvider allowedGroups={user.allowedGroups}>
         {activeTab === 'comparison' && <ComparisonPage allowedGroups={user.allowedGroups} />}
         {activeTab === 'utilization' && <UtilizationPage allowedGroups={user.allowedGroups} />}
         {activeTab === 'machines' && (
@@ -140,6 +143,7 @@ export function App() {
         )}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'users' && isAdmin && <UsersPage currentUserId={user.id} />}
+        </DateRangeProvider>
       </main>
     </div>
   );

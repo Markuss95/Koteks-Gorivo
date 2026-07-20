@@ -19,8 +19,14 @@ export type MachineBySerial = Map<string, Machine>;
 export type ActivityBySerial = Map<string, MachineUtilization>;
 export type PlaceBySerial = Map<string, string>;
 
-export function fileStem(from: string, to: string, kind = 'gorivo'): string {
-  return `koteks-${kind}_${fileDate(from)}_${fileDate(to)}`;
+/**
+ * Report filename stem. When the report covers exactly one worksite its key is
+ * included, so a user subscribed to several groups can save the separate mails
+ * side by side without the names colliding.
+ */
+export function fileStem(from: string, to: string, kind = 'gorivo', group?: string): string {
+  const site = group ? `${group}_` : '';
+  return `koteks-${kind}_${site}${fileDate(from)}_${fileDate(to)}`;
 }
 
 function machineLabel(m: MachineComparison): string {

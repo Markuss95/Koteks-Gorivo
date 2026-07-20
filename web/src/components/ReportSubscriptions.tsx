@@ -100,7 +100,8 @@ export function ReportSubscriptions() {
 
       <div className="muted" style={{ marginBottom: 12 }}>
         Izvještaji se šalju automatski zadnji radni dan u mjesecu i pokrivaju cijeli
-        prethodni mjesec. Primatelj vidi samo grupe koje su mu dodijeljene.
+        prethodni mjesec. Primatelj vidi samo grupe koje su mu dodijeljene, a za
+        svaku grupu dobiva zasebnu poruku.
       </div>
 
       {error && <div className="error-box">{error}</div>}
@@ -115,7 +116,7 @@ export function ReportSubscriptions() {
                 <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
                   {runResult.details.map((d, i) => (
                     <li key={i}>
-                      {d.recipient} — {d.type}/{d.format}: {d.status}
+                      {d.recipient} — {d.group} — {d.type}/{d.format}: {d.status}
                       {d.message ? ` (${d.message})` : ''}
                     </li>
                   ))}

@@ -11,7 +11,7 @@ import { expandFormats } from '../services/reports/select.js';
 import { isMailConfigured, sendMail } from '../services/mailer.js';
 import { fmtDate } from '../services/reports/format.js';
 import { isLastWorkingDayOfMonth, previousMonthRange } from '../services/workdays.js';
-import { GROUP_KEYS, type MachineGroup } from '../services/groups.js';
+import { GROUP_LABELS, type MachineGroup } from '../services/groups.js';
 
 export interface RunResult {
   ran: boolean;
@@ -21,7 +21,14 @@ export interface RunResult {
   sent: number;
   failed: number;
   skipped: number;
-  details: Array<{ recipient: string; type: string; format: string; status: string; message?: string }>;
+  details: Array<{
+    recipient: string;
+    type: string;
+    format: string;
+    group: string;
+    status: string;
+    message?: string;
+  }>;
 }
 
 /** Recipient domain check, mirroring the manual-send endpoint. */
@@ -71,31 +78,22 @@ export async function runMonthlyReports(opts: {
   // Reports are identical for any two subscribers with the same type, format and
   // visible groups, so build once and reuse — the fuel report is the slow part.
   const cache = new Map<string, Awaited<ReturnType<typeof buildReport>>>();
+  const pushDetail = (d: RunResult['details'][number]) => result.details.push(d);
 
   for (const sub of subs) {
-    const detail = {
-      recipient: sub.username,
-      type: sub.reportType,
-      format: sub.format,
-      status: 'ok',
-      message: undefined as string | undefined,
-    };
+    const base = { recipient: sub.username, type: sub.reportType, format: sub.format };
 
     try {
       if (!domainAllowed(sub.username)) {
-        detail.status = 'skipped';
-        detail.message = 'domena primatelja nije dopuštena';
+        pushDetail({ ...base, group: '—', status: 'skipped', message: 'domena primatelja nije dopuštena' });
         result.skipped += 1;
-        result.details.push(detail);
         continue;
       }
 
       const user = getUserById(sub.userId);
       if (!user) {
-        detail.status = 'skipped';
-        detail.message = 'korisnik više ne postoji';
+        pushDetail({ ...base, group: '—', status: 'skipped', message: 'korisnik više ne postoji' });
         result.skipped += 1;
-        result.details.push(detail);
         continue;
       }
 
@@ -107,76 +105,74 @@ export async function runMonthlyReports(opts: {
         user.role === 'admin' ? 'admin' : 'user',
       );
       if (groups.length === 0) {
-        detail.status = 'skipped';
-        detail.message = 'korisnik nema dodijeljenih grupa';
+        pushDetail({ ...base, group: '—', status: 'skipped', message: 'korisnik nema dodijeljenih grupa' });
         result.skipped += 1;
-        result.details.push(detail);
         continue;
       }
 
-      // 'both' produces one PDF and one Excel, attached to a single message.
-      const groupKey = [...groups].sort().join(',');
-      const reports = [];
-      for (const f of expandFormats(sub.format)) {
-        const key = `${sub.reportType}|${f}|${groupKey}`;
-        let report = cache.get(key);
-        if (!report) {
-          report = await buildReport({
-            type: sub.reportType,
-            format: f,
-            from,
-            to,
-            groups,
-            scope: 'matched',
-          });
-          cache.set(key, report);
+      // One mail per worksite rather than a single combined report: the figures
+      // are only meaningful per site, and the subject can then name the site.
+      for (const group of groups) {
+        const label = GROUP_LABELS[group];
+
+        // 'both' produces one PDF and one Excel, attached to the same message.
+        const reports = [];
+        for (const f of expandFormats(sub.format)) {
+          const key = `${sub.reportType}|${f}|${group}`;
+          let report = cache.get(key);
+          if (!report) {
+            report = await buildReport({
+              type: sub.reportType,
+              format: f,
+              from,
+              to,
+              groups: [group],
+              scope: 'matched',
+            });
+            cache.set(key, report);
+          }
+          reports.push(report);
         }
-        reports.push(report);
-      }
 
-      if (reports.every((r) => r.rowCount === 0)) {
-        detail.status = 'skipped';
-        detail.message = 'nema podataka za razdoblje';
-        result.skipped += 1;
-        result.details.push(detail);
-        continue;
-      }
+        if (reports.every((r) => r.rowCount === 0)) {
+          pushDetail({ ...base, group: label, status: 'skipped', message: 'nema podataka za razdoblje' });
+          result.skipped += 1;
+          continue;
+        }
 
-      const title = reportTitle(sub.reportType);
-      if (!opts.dryRun) {
-        await sendMail({
-          to: [sub.username],
-          subject: `${title} · ${fmtDate(from)} – ${fmtDate(to)}`,
-          text:
-            `U prilogu je ${title.toLowerCase()} za razdoblje ${fmtDate(from)} – ${fmtDate(to)}.\n\n` +
-            'Ovo je automatska poruka iz aplikacije Koteks Gorivo.',
-          attachments: reports.map((r) => ({
-            filename: r.filename,
-            contentType: r.contentType,
-            contentBase64: r.buffer.toString('base64'),
-          })),
-        });
-      }
+        const title = reportTitle(sub.reportType);
+        const subject = `${title} · ${label} · ${fmtDate(from)} – ${fmtDate(to)}`;
+        if (!opts.dryRun) {
+          await sendMail({
+            to: [sub.username],
+            subject,
+            text:
+              `U prilogu je ${title.toLowerCase()} za ${label}, razdoblje ${fmtDate(from)} – ${fmtDate(to)}.
 
-      result.sent += 1;
-      detail.status = opts.dryRun ? 'dry-run' : 'sent';
-      result.details.push(detail);
-      if (!opts.dryRun) {
-        logReportRun({
-          periodFrom: from,
-          periodTo: to,
-          recipient: sub.username,
-          reportType: sub.reportType,
-          format: sub.format,
-          status: 'success',
-        });
+` +
+              'Ovo je automatska poruka iz aplikacije Koteks Gorivo.',
+            attachments: reports.map((r) => ({
+              filename: r.filename,
+              contentType: r.contentType,
+              contentBase64: r.buffer.toString('base64'),
+            })),
+          });
+          logReportRun({
+            periodFrom: from,
+            periodTo: to,
+            recipient: sub.username,
+            reportType: `${sub.reportType} (${label})`,
+            format: sub.format,
+            status: 'success',
+          });
+        }
+        result.sent += 1;
+        pushDetail({ ...base, group: label, status: opts.dryRun ? 'dry-run' : 'sent' });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       result.failed += 1;
-      detail.status = 'error';
-      detail.message = message;
-      result.details.push(detail);
+      pushDetail({ ...base, group: '—', status: 'error', message });
       // One recipient failing must not abort the rest of the run.
       console.error(`[reports] failed for ${sub.username}:`, message);
       if (!opts.dryRun) {
