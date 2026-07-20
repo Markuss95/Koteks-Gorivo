@@ -19,6 +19,8 @@ import {
   exportUtilizationPdf,
   groupExcluded,
   lastKnownPosition,
+  type Delivery,
+  type ReportFile,
 } from '../export';
 import { reverseGeocode, type GeoPoint } from '../geocode';
 
@@ -28,6 +30,21 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 // Silence threshold for this report's headline card. Also the cutoff at which
 // the report prints a machine's last known location (see LOCATION_AFTER_DAYS).
 const STALE_DAYS = LOCATION_AFTER_DAYS;
+
+// FileReader gives us base64 without blowing the call stack on large files, which
+// String.fromCharCode(...bytes) would do.
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Čitanje datoteke nije uspjelo.'));
+    reader.onload = () => {
+      const result = String(reader.result);
+      // Strip the "data:<mime>;base64," prefix — Graph wants raw base64.
+      resolve(result.slice(result.indexOf(',') + 1));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
 
 type ReportType = 'fuel' | 'activity';
 type Format = 'pdf' | 'excel';
@@ -61,6 +78,9 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
   // Reverse-geocoding progress; the lookups are rate-limited to 1/s, so a first
   // run over many machines takes a while and needs to say so.
   const [geoProgress, setGeoProgress] = useState<{ done: number; total: number } | null>(null);
+  const [sending, setSending] = useState(false);
+  // Address the last report actually went to, echoed back by the server.
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -205,33 +225,66 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
   const rowCount = isFuel ? fuelRows.length : activityRows.length;
   const ready = isFuel ? fuelReport !== null : activityData !== null;
 
+  // Builds the report exactly once, for either destination — so what lands in the
+  // inbox is byte-identical to what the download button produces.
+  const buildReport = async (delivery: Delivery): Promise<ReportFile | null> => {
+    if (isFuel && fuelReport) {
+      const fn = format === 'pdf' ? exportComparisonPdf : exportComparisonExcel;
+      return fn(fuelRows, fuelReport, from, to, activityBySerial, fuelExcluded, delivery);
+    }
+    if (!isFuel) {
+      // Only the machines that actually print a position get looked up, and
+      // cached hits cost nothing — so most runs make no network calls at all.
+      const points: GeoPoint[] = [];
+      for (const m of activityRows) {
+        const pos = lastKnownPosition(m, machineBySerial);
+        if (pos) points.push({ serialNumber: m.serialNumber, lat: pos.lat, lon: pos.lon });
+      }
+      const places = await reverseGeocode(points, (done, total) =>
+        setGeoProgress(total > 0 && done < total ? { done, total } : null),
+      );
+      setGeoProgress(null);
+      const fn = format === 'pdf' ? exportUtilizationPdf : exportUtilizationExcel;
+      return fn(activityRows, from, to, machineBySerial, places, delivery);
+    }
+    return null;
+  };
+
   const generate = async () => {
     if (rowCount === 0) return;
     setGenerating(true);
     setError(null);
     try {
-      if (isFuel && fuelReport) {
-        const fn = format === 'pdf' ? exportComparisonPdf : exportComparisonExcel;
-        await fn(fuelRows, fuelReport, from, to, activityBySerial, fuelExcluded);
-      } else if (!isFuel) {
-        // Only the machines that actually print a position get looked up, and
-        // cached hits cost nothing — so most runs make no network calls at all.
-        const points: GeoPoint[] = [];
-        for (const m of activityRows) {
-          const pos = lastKnownPosition(m, machineBySerial);
-          if (pos) points.push({ serialNumber: m.serialNumber, lat: pos.lat, lon: pos.lon });
-        }
-        const places = await reverseGeocode(points, (done, total) =>
-          setGeoProgress(total > 0 && done < total ? { done, total } : null),
-        );
-        setGeoProgress(null);
-        const fn = format === 'pdf' ? exportUtilizationPdf : exportUtilizationExcel;
-        await fn(activityRows, from, to, machineBySerial, places);
-      }
+      await buildReport('download');
     } catch (e) {
       setError(`Izrada izvještaja nije uspjela: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setGenerating(false);
+      setGeoProgress(null);
+    }
+  };
+
+  const sendByEmail = async () => {
+    if (rowCount === 0) return;
+    setSending(true);
+    setError(null);
+    setSentTo(null);
+    try {
+      const file = await buildReport('file');
+      if (!file) throw new Error('Izvještaj nije izrađen.');
+      const title = isFuel ? 'Izvještaj o potrošnji goriva' : 'Izvještaj o aktivnosti strojeva';
+      const res = await api.emailReport({
+        filename: file.filename,
+        contentType: file.contentType,
+        contentBase64: await blobToBase64(file.blob),
+        subject: `${title} · ${from} – ${to}`,
+        body: `U prilogu je ${title.toLowerCase()} za razdoblje ${from} – ${to}.`,
+      });
+      setSentTo(res.to);
+    } catch (e) {
+      setError(`Slanje e-pošte nije uspjelo: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSending(false);
       setGeoProgress(null);
     }
   };
@@ -277,6 +330,7 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
       </div>
 
       {error && <div className="error-box">{error}</div>}
+      {sentTo && <div className="ok-box">Izvještaj je poslan na {sentTo}.</div>}
 
       <div className="panel">
         <div className="panel-head">
@@ -287,13 +341,24 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
             <button
               className="btn"
               onClick={generate}
-              disabled={loading || generating || !ready || rowCount === 0}
+              disabled={loading || generating || sending || !ready || rowCount === 0}
             >
-              {geoProgress
+              {geoProgress && !sending
                 ? `Dohvaćanje lokacija… (${geoProgress.done}/${geoProgress.total})`
                 : generating
                   ? 'Izrada…'
                   : 'Generiraj izvještaj'}
+            </button>
+            <button
+              className="btn secondary"
+              onClick={sendByEmail}
+              disabled={loading || generating || sending || !ready || rowCount === 0}
+            >
+              {geoProgress && sending
+                ? `Dohvaćanje lokacija… (${geoProgress.done}/${geoProgress.total})`
+                : sending
+                  ? 'Slanje…'
+                  : 'Pošalji e-poštom'}
             </button>
           </div>
         </div>

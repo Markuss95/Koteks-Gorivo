@@ -101,6 +101,19 @@ export const config = {
   // In production set to the Netlify site URL, e.g. https://koteks-gorivo.netlify.app
   corsOrigin: optional('CORS_ORIGIN', ''),
 
+  // Outbound mail via Microsoft Graph (see services/mailer.ts). All blank =
+  // the feature is simply disabled and the endpoint reports it cleanly.
+  mail: {
+    tenantId: optional('GRAPH_TENANT_ID', ''),
+    clientId: optional('GRAPH_CLIENT_ID', ''),
+    clientSecret: optional('GRAPH_CLIENT_SECRET', ''),
+    // Mailbox the report is sent as.
+    from: optional('MAIL_FROM', ''),
+    // Fixed recipient for now; the UI has no address field yet.
+    defaultTo: optional('MAIL_TO', 'marko.krajina@osijek-koteks.hr'),
+    saveToSentItems: optional('MAIL_SAVE_TO_SENT', 'true').toLowerCase() === 'true',
+  },
+
   auth: {
     // Secret for signing JWTs. A dev fallback keeps local setup frictionless;
     // production MUST set JWT_SECRET (warned at boot in index.ts).

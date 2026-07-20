@@ -116,4 +116,14 @@ export const api = {
   updateSettings: (fuelArticleCodes: string[]) =>
     send<Settings>('/api/settings', 'PUT', { fuelArticleCodes }),
   triggerSync: () => send<{ started: boolean }>('/api/sync', 'POST'),
+
+  // Mail a generated report. The file is built in the browser and posted as
+  // base64; the recipient is fixed server-side, not chosen here.
+  emailReport: (input: {
+    filename: string;
+    contentType: string;
+    contentBase64: string;
+    subject: string;
+    body?: string;
+  }) => send<{ ok: boolean; to: string }>('/api/reports/email', 'POST', input),
 };

@@ -11,6 +11,12 @@ import { lidatHealth } from './lidat/client.js';
 import { runLidatSync, isSyncing } from './sync/lidatSync.js';
 import { authenticate, signToken, requireAuth, type AuthedRequest } from './auth.js';
 import { listUsers, createUser, updateUser, deleteUser } from './services/users.js';
+import {
+  MAX_ATTACHMENT_BYTES,
+  MailNotConfiguredError,
+  isMailConfigured,
+  sendMail,
+} from './services/mailer.js';
 
 export const api = Router();
 
@@ -357,5 +363,58 @@ api.delete('/users/:id', adminOnly, (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ---- Report e-mail ----
+// The browser builds the PDF/XLSX (same code as the download button) and posts
+// it here as base64; the server attaches it and sends via Microsoft Graph. The
+// recipient is fixed in config for now — no address is accepted from the client,
+// so this endpoint can't be used to mail arbitrary people.
+const emailReportSchema = z.object({
+  filename: z.string().min(1).max(200),
+  contentType: z.string().min(1).max(200),
+  contentBase64: z.string().min(1),
+  subject: z.string().min(1).max(300),
+  body: z.string().max(4000).optional(),
+});
+
+api.post('/reports/email', async (req, res) => {
+  const parse = emailReportSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  const { filename, contentType, contentBase64, subject, body } = parse.data;
+
+  // Size first: "too big" is a property of the request, so it should answer the
+  // same way whether or not mail happens to be configured. Also keeps Graph from
+  // failing later with a far less obvious error.
+  const rawBytes = Math.floor((contentBase64.length * 3) / 4);
+  if (rawBytes > MAX_ATTACHMENT_BYTES) {
+    res.status(413).json({
+      error: `Izvještaj je prevelik za slanje e-poštom (${(rawBytes / 1024 / 1024).toFixed(1)} MB, ograničenje ${(MAX_ATTACHMENT_BYTES / 1024 / 1024).toFixed(1)} MB).`,
+    });
+    return;
+  }
+
+  if (!isMailConfigured()) {
+    res.status(503).json({ error: new MailNotConfiguredError().message });
+    return;
+  }
+
+  const to = config.mail.defaultTo;
+  try {
+    await sendMail({
+      to: [to],
+      subject,
+      text: body ?? 'U prilogu se nalazi izvještaj iz aplikacije Koteks Gorivo.',
+      attachments: [{ filename, contentType, contentBase64 }],
+    });
+    console.log(`[mail] report "${filename}" sent to ${to} by ${(req as AuthedRequest).user?.username}`);
+    res.json({ ok: true, to });
+  } catch (err) {
+    console.error('[mail] send failed:', err);
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

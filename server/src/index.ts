@@ -19,7 +19,10 @@ function bootstrap(): void {
 
   const app = express();
   app.use(cors(config.corsOrigin ? { origin: config.corsOrigin } : undefined));
-  app.use(express.json());
+  // Reports are posted as base64 for e-mailing, so the default 100 kb JSON limit
+  // is far too small. 8 MB comfortably covers the ~2.5 MB attachment cap plus
+  // base64's ~33% overhead (see services/mailer.ts).
+  app.use(express.json({ limit: '8mb' }));
   app.use('/api', api);
 
   app.listen(config.port, () => {

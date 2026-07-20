@@ -9,6 +9,51 @@ function fileStem(from: string, to: string, kind = 'gorivo'): string {
   return `koteks-${kind}_${from}_${to}`;
 }
 
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/**
+ * What to do with a finished report: hand it to the browser as a download (the
+ * button), or return the bytes so the caller can post it somewhere (e-mail).
+ */
+export type Delivery = 'download' | 'file';
+
+export interface ReportFile {
+  filename: string;
+  contentType: string;
+  blob: Blob;
+}
+
+// Every exporter ends here, so 'download' and 'file' can never drift apart —
+// the e-mailed file is byte-identical to the downloaded one.
+function finishWorkbook(
+  XLSX: typeof import('xlsx'),
+  wb: import('xlsx').WorkBook,
+  filename: string,
+  delivery: Delivery,
+): ReportFile | null {
+  if (delivery === 'download') {
+    XLSX.writeFile(wb, filename);
+    return null;
+  }
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  return { filename, contentType: XLSX_MIME, blob: new Blob([buf], { type: XLSX_MIME }) };
+}
+
+async function finishPdf(
+  pdfMake: any,
+  doc: unknown,
+  filename: string,
+  delivery: Delivery,
+): Promise<ReportFile | null> {
+  const built = pdfMake.createPdf(doc);
+  if (delivery === 'download') {
+    built.download(filename);
+    return null;
+  }
+  const blob = await new Promise<Blob>((resolve) => built.getBlob(resolve));
+  return { filename, contentType: 'application/pdf', blob };
+}
+
 function machineLabel(m: MachineComparison): string {
   return `${shortModel(m.model)} ${m.serialNumber}`;
 }
@@ -118,7 +163,8 @@ export async function exportComparisonExcel(
   to: string,
   activity?: ActivityBySerial,
   excluded?: MachineComparison[],
-): Promise<void> {
+  delivery: Delivery = 'download',
+): Promise<ReportFile | null> {
   const XLSX = await import('xlsx');
 
   const columns = activity ? [...COLUMNS, ...ACTIVITY_EXTRA_COLUMNS] : [...COLUMNS];
@@ -199,7 +245,7 @@ export async function exportComparisonExcel(
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Detalji po stroju');
-  XLSX.writeFile(wb, `${fileStem(from, to)}.xlsx`);
+  return finishWorkbook(XLSX, wb, `${fileStem(from, to)}.xlsx`, delivery);
 }
 
 // ---- PDF (pdfmake) ----
@@ -242,7 +288,8 @@ export async function exportComparisonPdf(
   to: string,
   activity?: ActivityBySerial,
   excluded?: MachineComparison[],
-): Promise<void> {
+  delivery: Delivery = 'download',
+): Promise<ReportFile | null> {
   const pdfMake = await loadPdfMake();
 
   const signed = (n: number, suffix = '') => `${n >= 0 ? '+' : ''}${fmt(n, 1)}${suffix}`;
@@ -338,7 +385,7 @@ export async function exportComparisonPdf(
     footer: pageFooter,
   };
 
-  pdfMake.createPdf(doc).download(`${fileStem(from, to)}.pdf`);
+  return finishPdf(pdfMake, doc, `${fileStem(from, to)}.pdf`, delivery);
 }
 
 // The "machines left out" appendix: one sub-table per reason, each preceded by a
@@ -469,7 +516,8 @@ export async function exportUtilizationExcel(
   to: string,
   machines?: MachineBySerial,
   places?: PlaceBySerial,
-): Promise<void> {
+  delivery: Delivery = 'download',
+): Promise<ReportFile | null> {
   const XLSX = await import('xlsx');
 
   const header = [
@@ -508,7 +556,7 @@ export async function exportUtilizationExcel(
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Aktivnost strojeva');
-  XLSX.writeFile(wb, `${fileStem(from, to, 'aktivnost')}.xlsx`);
+  return finishWorkbook(XLSX, wb, `${fileStem(from, to, 'aktivnost')}.xlsx`, delivery);
 }
 
 export async function exportUtilizationPdf(
@@ -517,7 +565,8 @@ export async function exportUtilizationPdf(
   to: string,
   machines?: MachineBySerial,
   places?: PlaceBySerial,
-): Promise<void> {
+  delivery: Delivery = 'download',
+): Promise<ReportFile | null> {
   const pdfMake = await loadPdfMake();
 
   const body = [
@@ -583,5 +632,5 @@ export async function exportUtilizationPdf(
     footer: pageFooter,
   };
 
-  pdfMake.createPdf(doc).download(`${fileStem(from, to, 'aktivnost')}.pdf`);
+  return finishPdf(pdfMake, doc, `${fileStem(from, to, 'aktivnost')}.pdf`, delivery);
 }
