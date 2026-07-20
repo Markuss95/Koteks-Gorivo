@@ -69,6 +69,16 @@ export function isStale(iso: string | null | undefined, days = 10): boolean {
   return d === null || d > days;
 }
 
+/**
+ * 'YYYY-MM-DD' → Croatian 'DD.MM.YYYY.' (trailing dot included).
+ * Formatted from the string parts rather than via Date, so a UTC-midnight value
+ * can't slip to the previous day in a negative-offset timezone.
+ */
+export function fmtDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? `${m[3]}.${m[2]}.${m[1]}.` : iso;
+}
+
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);

@@ -191,4 +191,10 @@ export interface Settings {
   fuelArticleCodes: string[];
   syncCron: string;
   minDate: string;
+  // Default recipient for e-mailed reports, and whether the server can send at
+  // all. Optional so an older backend still typechecks.
+  mailTo?: string;
+  mailConfigured?: boolean;
+  // Domains reports may be sent to. Empty/absent = no restriction.
+  mailAllowedDomains?: string[];
 }

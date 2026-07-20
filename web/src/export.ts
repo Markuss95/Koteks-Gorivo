@@ -3,10 +3,17 @@
 // stroju"). Both libraries are lazy-imported so they only load when the user
 // exports.
 import type { ComparisonResult, Machine, MachineComparison, MachineUtilization } from './types';
-import { daysSince, fmt, fmtDateTime, shortModel } from './util';
+import { daysSince, fmt, fmtDate, fmtDateTime, shortModel } from './util';
+
+// dd.mm.yyyy for filenames — fmtDate's trailing dot is dropped, since a dot
+// immediately before the extension reads as a typo and Windows strips trailing
+// dots from names in some contexts.
+function fileDate(iso: string): string {
+  return fmtDate(iso).replace(/\.$/, '');
+}
 
 function fileStem(from: string, to: string, kind = 'gorivo'): string {
-  return `koteks-${kind}_${from}_${to}`;
+  return `koteks-${kind}_${fileDate(from)}_${fileDate(to)}`;
 }
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';

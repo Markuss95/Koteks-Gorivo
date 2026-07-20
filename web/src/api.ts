@@ -125,5 +125,6 @@ export const api = {
     contentBase64: string;
     subject: string;
     body?: string;
+    to?: string;
   }) => send<{ ok: boolean; to: string }>('/api/reports/email', 'POST', input),
 };

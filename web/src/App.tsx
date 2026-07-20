@@ -135,7 +135,9 @@ export function App() {
           />
         )}
         {activeTab === 'stale' && <StaleMachinesPage allowedGroups={user.allowedGroups} />}
-        {activeTab === 'reports' && <ReportsPage allowedGroups={user.allowedGroups} />}
+        {activeTab === 'reports' && (
+          <ReportsPage allowedGroups={user.allowedGroups} isAdmin={isAdmin} />
+        )}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'users' && isAdmin && <UsersPage currentUserId={user.id} />}
       </main>

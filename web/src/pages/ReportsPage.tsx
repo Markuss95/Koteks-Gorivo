@@ -8,7 +8,7 @@ import type {
   MachineUtilization,
   UtilizationResult,
 } from '../types';
-import { daysSince, effectiveDateFloor, fmt, isStale, today } from '../util';
+import { daysSince, effectiveDateFloor, fmt, fmtDate, isStale, today } from '../util';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import {
@@ -57,7 +57,26 @@ function hasBothEntries(m: MachineComparison): boolean {
   return m.marisIssuedLitres > 0 && m.lidatConsumedLitres !== null && m.lidatConsumedLitres > 0;
 }
 
-export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }) {
+// Deliberately permissive: real-world addresses vary far more than strict RFC
+// patterns allow. The server validates properly; this only catches typos early.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Mirrors the server's check so the dialog can disable the button immediately.
+// The server is still the authority — this is convenience, not a control.
+function domainAllowed(address: string, allowed: string[]): boolean {
+  if (allowed.length === 0) return true;
+  const at = address.lastIndexOf('@');
+  if (at === -1) return false;
+  return allowed.includes(address.slice(at + 1).trim().toLowerCase());
+}
+
+export function ReportsPage({
+  allowedGroups,
+  isAdmin,
+}: {
+  allowedGroups: MachineGroup[];
+  isAdmin: boolean;
+}) {
   const initialGroups: MachineGroup[] = [
     allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek',
   ];
@@ -81,12 +100,20 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
   const [sending, setSending] = useState(false);
   // Address the last report actually went to, echoed back by the server.
   const [sentTo, setSentTo] = useState<string | null>(null);
+  // Recipient dialog: null = closed. Opens prefilled with the server default.
+  const [recipient, setRecipient] = useState<string | null>(null);
+  const [defaultMailTo, setDefaultMailTo] = useState('');
+  const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .settings()
-      .then((s) => setMinDate(s.minDate))
+      .then((s) => {
+        setMinDate(s.minDate);
+        setDefaultMailTo(s.mailTo ?? '');
+        setAllowedDomains(s.mailAllowedDomains ?? []);
+      })
       .catch(() => {});
     // The machine list carries the last known position; it isn't date-dependent,
     // so it's fetched once. A failure only costs the location column.
@@ -264,8 +291,11 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
     }
   };
 
-  const sendByEmail = async () => {
+  // Named `sendTo`, not `to` — `to` is the report's end date, and shadowing it
+  // here would quietly put an e-mail address in the subject line.
+  const sendByEmail = async (sendTo: string) => {
     if (rowCount === 0) return;
+    setRecipient(null);
     setSending(true);
     setError(null);
     setSentTo(null);
@@ -277,8 +307,9 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
         filename: file.filename,
         contentType: file.contentType,
         contentBase64: await blobToBase64(file.blob),
-        subject: `${title} · ${from} – ${to}`,
-        body: `U prilogu je ${title.toLowerCase()} za razdoblje ${from} – ${to}.`,
+        subject: `${title} · ${fmtDate(from)} – ${fmtDate(to)}`,
+        body: `U prilogu je ${title.toLowerCase()} za razdoblje ${fmtDate(from)} – ${fmtDate(to)}.`,
+        to: sendTo,
       });
       setSentTo(res.to);
     } catch (e) {
@@ -349,17 +380,20 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
                   ? 'Izrada…'
                   : 'Generiraj izvještaj'}
             </button>
-            <button
-              className="btn secondary"
-              onClick={sendByEmail}
-              disabled={loading || generating || sending || !ready || rowCount === 0}
-            >
-              {geoProgress && sending
-                ? `Dohvaćanje lokacija… (${geoProgress.done}/${geoProgress.total})`
-                : sending
-                  ? 'Slanje…'
-                  : 'Pošalji e-poštom'}
-            </button>
+            {/* Admin-only. The server enforces this too — see POST /reports/email. */}
+            {isAdmin && (
+              <button
+                className="btn secondary"
+                onClick={() => setRecipient(defaultMailTo)}
+                disabled={loading || generating || sending || !ready || rowCount === 0}
+              >
+                {geoProgress && sending
+                  ? `Dohvaćanje lokacija… (${geoProgress.done}/${geoProgress.total})`
+                  : sending
+                    ? 'Slanje…'
+                    : 'Pošalji e-poštom'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -455,6 +489,87 @@ export function ReportsPage({ allowedGroups }: { allowedGroups: MachineGroup[] }
           </>
         )}
       </div>
+
+      {recipient !== null && (
+        <RecipientDialog
+          value={recipient}
+          allowedDomains={allowedDomains}
+          onChange={setRecipient}
+          onCancel={() => setRecipient(null)}
+          onConfirm={sendByEmail}
+        />
+      )}
     </>
+  );
+}
+
+/** Small centered dialog asking who the report should go to. */
+function RecipientDialog({
+  value,
+  allowedDomains,
+  onChange,
+  onCancel,
+  onConfirm,
+}: {
+  value: string;
+  allowedDomains: string[];
+  onChange: (v: string) => void;
+  onCancel: () => void;
+  onConfirm: (to: string) => void;
+}) {
+  const trimmed = value.trim();
+  const wellFormed = EMAIL_RE.test(trimmed);
+  const domainOk = domainAllowed(trimmed, allowedDomains);
+  const valid = wellFormed && domainOk;
+
+  return (
+    <div className="dialog-overlay" onClick={onCancel}>
+      <form
+        className="dialog"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (valid) onConfirm(trimmed);
+        }}
+      >
+        <h2>Pošalji izvještaj e-poštom</h2>
+        <div className="field">
+          <label htmlFor="report-recipient">Primatelj</label>
+          <input
+            id="report-recipient"
+            type="email"
+            value={value}
+            autoFocus
+            placeholder="ime.prezime@osijek-koteks.hr"
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onCancel();
+            }}
+          />
+        </div>
+        {wellFormed && !domainOk && (
+          <div className="muted" style={{ fontSize: 12, color: 'var(--bad)' }}>
+            Ta domena nije dopuštena.
+          </div>
+        )}
+        <div className="muted" style={{ fontSize: 12 }}>
+          Izvještaj se šalje s adrese noreply@osijek-koteks.hr.
+          {allowedDomains.length > 0 && (
+            <>
+              <br />
+              Dopuštene domene: {allowedDomains.join(', ')}.
+            </>
+          )}
+        </div>
+        <div className="dialog-actions">
+          <button type="button" className="btn secondary" onClick={onCancel}>
+            Odustani
+          </button>
+          <button type="submit" className="btn" disabled={!valid}>
+            Pošalji
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }

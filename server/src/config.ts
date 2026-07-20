@@ -109,8 +109,16 @@ export const config = {
     clientSecret: optional('GRAPH_CLIENT_SECRET', ''),
     // Mailbox the report is sent as.
     from: optional('MAIL_FROM', ''),
-    // Fixed recipient for now; the UI has no address field yet.
+    // Default recipient, prefilled in the "send report" dialog.
     defaultTo: optional('MAIL_TO', 'marko.krajina@osijek-koteks.hr'),
+    // Reports may only be sent to these domains. Empty = no restriction.
+    allowedDomains: optional(
+      'MAIL_ALLOWED_DOMAINS',
+      'osijek-koteks.hr,velicki-kamen.hr,kamen-psunj.hr,abgtest.hr,molaris.hr,prodorina.hr,r-promet.hr',
+    )
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
     saveToSentItems: optional('MAIL_SAVE_TO_SENT', 'true').toLowerCase() === 'true',
   },
 

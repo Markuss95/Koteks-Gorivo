@@ -271,6 +271,11 @@ api.get('/settings', (_req, res) => {
     fuelArticleCodes: getFuelArticleCodes(),
     syncCron: config.sync.cron,
     minDate: config.dataMinDate,
+    // Prefill + client-side hint for the "send report" dialog; not secrets. The
+    // domain restriction is enforced server-side regardless.
+    mailTo: config.mail.defaultTo,
+    mailConfigured: isMailConfigured(),
+    mailAllowedDomains: config.mail.allowedDomains,
   });
 });
 
@@ -377,15 +382,33 @@ const emailReportSchema = z.object({
   contentBase64: z.string().min(1),
   subject: z.string().min(1).max(300),
   body: z.string().max(4000).optional(),
+  // Recipient chosen by the admin in the UI. Omitted → the configured default.
+  to: z.string().email('Neispravna e-mail adresa').max(320).optional(),
 });
 
-api.post('/reports/email', async (req, res) => {
+/**
+ * Recipient domain check. The address is taken from the last '@' so that a local
+ * part containing '@' can't smuggle a foreign domain past the comparison. An
+ * empty allowlist disables the restriction entirely.
+ */
+function recipientDomainAllowed(address: string): boolean {
+  if (config.mail.allowedDomains.length === 0) return true;
+  const at = address.lastIndexOf('@');
+  if (at === -1) return false;
+  const domain = address.slice(at + 1).trim().toLowerCase();
+  return config.mail.allowedDomains.includes(domain);
+}
+
+// Admin-only: this sends mail as noreply@ to an address the caller supplies, so
+// it must not be reachable by ordinary users. Hiding the button in the UI is
+// cosmetic — this is the actual gate.
+api.post('/reports/email', adminOnly, async (req, res) => {
   const parse = emailReportSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.flatten() });
     return;
   }
-  const { filename, contentType, contentBase64, subject, body } = parse.data;
+  const { filename, contentType, contentBase64, subject, body, to: requestedTo } = parse.data;
 
   // Size first: "too big" is a property of the request, so it should answer the
   // same way whether or not mail happens to be configured. Also keeps Graph from
@@ -398,12 +421,23 @@ api.post('/reports/email', async (req, res) => {
     return;
   }
 
+  // Recipient is validated before the configuration check, for the same reason
+  // as the size guard: it's a property of the request, so it must answer the
+  // same way whether or not mail happens to be configured. Checked on the
+  // address actually used, so a misconfigured MAIL_TO can't bypass the allowlist.
+  const to = requestedTo ?? config.mail.defaultTo;
+  if (!recipientDomainAllowed(to)) {
+    res.status(400).json({
+      error: `Slanje je dopušteno samo na domene: ${config.mail.allowedDomains.join(', ')}.`,
+    });
+    return;
+  }
+
   if (!isMailConfigured()) {
     res.status(503).json({ error: new MailNotConfiguredError().message });
     return;
   }
 
-  const to = config.mail.defaultTo;
   try {
     await sendMail({
       to: [to],
