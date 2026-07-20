@@ -8,8 +8,9 @@ import { UsersPage } from './pages/UsersPage';
 import { LoginPage } from './pages/LoginPage';
 import { UtilizationPage } from './pages/UtilizationPage';
 import { StaleMachinesPage } from './pages/StaleMachinesPage';
+import { ReportsPage } from './pages/ReportsPage';
 
-type Tab = 'comparison' | 'utilization' | 'machines' | 'stale' | 'settings' | 'users';
+type Tab = 'comparison' | 'utilization' | 'machines' | 'stale' | 'reports' | 'settings' | 'users';
 
 export function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -86,6 +87,9 @@ export function App() {
           <button className={activeTab === 'machines' ? 'active' : ''} onClick={() => setTab('machines')}>
             Opće Informacije
           </button>
+          <button className={activeTab === 'reports' ? 'active' : ''} onClick={() => setTab('reports')}>
+            Izvještaji
+          </button>
           <button className={activeTab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>
             Postavke
           </button>
@@ -131,6 +135,7 @@ export function App() {
           />
         )}
         {activeTab === 'stale' && <StaleMachinesPage allowedGroups={user.allowedGroups} />}
+        {activeTab === 'reports' && <ReportsPage allowedGroups={user.allowedGroups} />}
         {activeTab === 'settings' && <SettingsPage />}
         {activeTab === 'users' && isAdmin && <UsersPage currentUserId={user.id} />}
       </main>
