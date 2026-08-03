@@ -23,22 +23,28 @@ export interface PublicUser {
   updatedAt: string | null;
 }
 
-/** Parse the stored allowed_groups JSON; NULL/invalid → all groups. */
+/**
+ * Parse the stored allowed_groups JSON.
+ *
+ * An explicitly stored empty list means "no groups" and is returned as such —
+ * the user then sees nothing and receives no monthly report. NULL is different:
+ * it's a row predating the allowed_groups column, and defaults to all groups so
+ * the migration doesn't lock anyone out.
+ */
 export function parseAllowedGroups(raw: string | null): MachineGroup[] {
-  if (!raw) return [...GROUP_KEYS];
+  if (raw === null || raw === '') return [...GROUP_KEYS];
   try {
     const arr = JSON.parse(raw);
-    const valid = Array.isArray(arr) ? arr.filter((g) => GROUP_KEYS.includes(g)) : [];
-    return valid.length ? (valid as MachineGroup[]) : [...GROUP_KEYS];
+    if (!Array.isArray(arr)) return [...GROUP_KEYS];
+    return arr.filter((g) => GROUP_KEYS.includes(g)) as MachineGroup[];
   } catch {
     return [...GROUP_KEYS];
   }
 }
 
-/** Normalise an incoming allowedGroups list; empty/invalid → all groups. */
+/** Normalise an incoming allowedGroups list. Empty stays empty — see above. */
 function serializeGroups(groups?: MachineGroup[]): string {
-  const valid = (groups ?? []).filter((g) => GROUP_KEYS.includes(g));
-  return JSON.stringify(valid.length ? valid : [...GROUP_KEYS]);
+  return JSON.stringify((groups ?? []).filter((g) => GROUP_KEYS.includes(g)));
 }
 
 /** The effective groups a user may see (admins always see all). */
