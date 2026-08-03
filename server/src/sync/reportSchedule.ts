@@ -150,6 +150,8 @@ export async function runMonthlyReports(opts: {
               `U prilogu je ${title.toLowerCase()} za ${label}, razdoblje ${fmtDate(from)} – ${fmtDate(to)}.
 
 ` +
+              'Logirajte se na aplikaciju preko linka https://koteks-gorivo.netlify.app/.\n' +
+              'Ako nemate podatke za prijavu javite se Marku 🙂\n\n' +
               'Ovo je automatska poruka iz aplikacije Koteks Gorivo.',
             attachments: reports.map((r) => ({
               filename: r.filename,
