@@ -122,20 +122,12 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
   // Totals recomputed from the visible (group-filtered) rows so the cards and
   // chart stay in sync with the selected groups.
   const totals = useMemo(() => {
-    let marisIssuedLitres = 0;
-    let lidatConsumedLitres = 0;
-    let machinesWithLidatData = 0;
-    // Subset difference: only machines that have BOTH a Maris issuance and a real
+    // Every card counts only machines that have BOTH a Maris issuance and a real
     // LiDAT reading, so a machine missing one side can't skew the comparison.
     let matchedMarisLitres = 0;
     let matchedLidatLitres = 0;
     let matchedMachines = 0;
     for (const m of rows) {
-      marisIssuedLitres += m.marisIssuedLitres;
-      if (m.lidatConsumedLitres !== null) {
-        lidatConsumedLitres += m.lidatConsumedLitres;
-        machinesWithLidatData += 1;
-      }
       if (m.marisIssuedLitres > 0 && m.lidatConsumedLitres !== null && m.lidatConsumedLitres > 0) {
         matchedMarisLitres += m.marisIssuedLitres;
         matchedLidatLitres += m.lidatConsumedLitres;
@@ -143,13 +135,10 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
       }
     }
     return {
-      marisIssuedLitres,
-      lidatConsumedLitres,
-      differenceLitres: marisIssuedLitres - lidatConsumedLitres,
       matchedDifferenceLitres: matchedMarisLitres - matchedLidatLitres,
+      matchedMarisLitres,
       matchedLidatLitres,
       matchedMachines,
-      machinesWithLidatData,
       machinesTotal: rows.length,
     };
   }, [rows]);
@@ -209,15 +198,17 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
       {data && (
         <div className="cards">
           <div className="card">
-            <div className="label">Maris — Ukupno izdano</div>
-            <div className="value maris">{fmt(totals.marisIssuedLitres)} L</div>
-            <div className="sub">iz skladišta (izdatnice)</div>
+            <div className="label">Maris — Izdano (Samo Strojevi s Maris i Lidat Očitanjem)</div>
+            <div className="value maris">{fmt(totals.matchedMarisLitres)} L</div>
+            <div className="sub">
+              iz skladišta (izdatnice) · {totals.matchedMachines}/{totals.machinesTotal} strojeva
+            </div>
           </div>
           <div className="card">
-            <div className="label">LiDAT — Ukupno potrošeno</div>
-            <div className="value lidat">{fmt(totals.lidatConsumedLitres)} L</div>
+            <div className="label">LiDAT — Potrošeno (Samo Strojevi s Maris i Lidat Očitanjem)</div>
+            <div className="value lidat">{fmt(totals.matchedLidatLitres)} L</div>
             <div className="sub">
-              stvarna potrošnja · {totals.machinesWithLidatData}/{totals.machinesTotal} strojeva
+              stvarna potrošnja · {totals.matchedMachines}/{totals.machinesTotal} strojeva
             </div>
           </div>
           <div className="card">
@@ -233,11 +224,6 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
                 ? `${((totals.matchedDifferenceLitres / totals.matchedLidatLitres) * 100).toFixed(1)}%`
                 : '—'}
             </div>
-          </div>
-          <div className="card">
-            <div className="label">Ukupna Razlika</div>
-            <div className="value">{fmt(totals.differenceLitres)} L</div>
-            <div className="sub">izdano − potrošeno</div>
           </div>
         </div>
       )}
