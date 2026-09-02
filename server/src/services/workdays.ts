@@ -1,10 +1,11 @@
-// Croatian public holidays and the "last working day of the month" rule used by
-// the monthly report scheduler.
+// Croatian public holidays, the "last working day of the month" rule used by the
+// report scheduler, and the periods each cadence covers.
 //
 // Holidays are computed, not listed year by year, so this needs no annual
 // maintenance. Company-specific days off (collective shutdowns and the like) can
 // be added via REPORT_EXTRA_HOLIDAYS in .env.
 import { config } from '../config.js';
+import type { ReportCadence } from './reports/select.js';
 
 /** Local-date key 'YYYY-MM-DD' (no UTC conversion — these are calendar dates). */
 export function dateKey(d: Date): string {
@@ -99,4 +100,79 @@ export function previousMonthRange(d: Date): { from: string; to: string } {
   const first = new Date(d.getFullYear(), d.getMonth() - 1, 1);
   const last = new Date(d.getFullYear(), d.getMonth(), 0);
   return { from: dateKey(first), to: dateKey(last) };
+}
+
+/** 1–4 for a zero-based month index (0 = January). */
+export function quarterOfMonth(month: number): 1 | 2 | 3 | 4 {
+  return (Math.floor(month / 3) + 1) as 1 | 2 | 3 | 4;
+}
+
+export interface QuarterPeriod {
+  from: string;
+  to: string;
+  quarter: 1 | 2 | 3 | 4;
+  year: number;
+  /** 'Q1 2026' — used in subjects and filenames. */
+  label: string;
+}
+
+/**
+ * The most recent quarter that has fully ended before `d`.
+ * A date anywhere in Q3 2026 yields Q2 2026 (01.04.–30.06.); anywhere in Q1
+ * yields Q4 of the previous year.
+ */
+export function lastCompletedQuarterRange(d: Date): QuarterPeriod {
+  // Step back to the last day of the previous quarter, then read it off.
+  const endMonth = Math.floor(d.getMonth() / 3) * 3; // first month of d's quarter
+  const last = new Date(d.getFullYear(), endMonth, 0); // day 0 = last day of the month before
+  const year = last.getFullYear();
+  const quarter = quarterOfMonth(last.getMonth());
+  const first = new Date(year, (quarter - 1) * 3, 1);
+  return { from: dateKey(first), to: dateKey(last), quarter, year, label: `Q${quarter} ${year}` };
+}
+
+/** March, June, September, December — the months a quarter ends in. */
+export function isQuarterEndMonth(month: number): boolean {
+  return (month + 1) % 3 === 0;
+}
+
+/**
+ * The quarter due to be sent on `d`, or null if none is.
+ *
+ * Quarterly reports follow the same one-month lag as the monthly ones: the
+ * quarter is sent on the last working day of the month *after* it ends, so Q1
+ * (Jan–Mar) goes out at the end of April, Q2 at the end of July, Q3 at the end
+ * of October and Q4 at the end of January.
+ */
+export function dueQuarterRange(d: Date): QuarterPeriod | null {
+  const previousMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  if (!isQuarterEndMonth(previousMonth.getMonth())) return null;
+  return lastCompletedQuarterRange(d);
+}
+
+export interface ReportPeriod {
+  from: string;
+  to: string;
+  /** 'Q1 2026' for a quarter; null for a month, which the dates already name. */
+  label: string | null;
+}
+
+/**
+ * The period a cadence covers for a run on `d`, or null when nothing is due.
+ *
+ * `force` is the manual "run now" from the admin panel: it ignores the calendar
+ * and uses the last period that has fully ended, so a quarterly test run works
+ * on any day of the year rather than only in April, July, October and January.
+ */
+export function periodForCadence(
+  d: Date,
+  cadence: ReportCadence,
+  force = false,
+): ReportPeriod | null {
+  if (cadence === 'quarterly') {
+    const q = force ? lastCompletedQuarterRange(d) : dueQuarterRange(d);
+    return q ? { from: q.from, to: q.to, label: q.label } : null;
+  }
+  const m = previousMonthRange(d);
+  return { from: m.from, to: m.to, label: null };
 }

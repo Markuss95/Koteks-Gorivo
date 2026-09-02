@@ -1,23 +1,30 @@
-// Monthly automatic reports.
+// Automatic report runs — monthly and quarterly.
 //
 // A daily cron wakes up and does nothing unless today is the last working day of
-// the month. On that day each active subscription gets its report for the *whole
-// previous month* — a run on 31 Aug sends 01.07.–31.07.
+// the month. On that day every active monthly subscription gets its report for
+// the *whole previous month* — a run on 31 Aug sends 01.07.–31.07.
+//
+// Quarterly subscriptions follow the same one-month lag, so they only go out
+// four times a year: Q1 (Jan–Mar) at the end of April, Q2 at the end of July,
+// Q3 at the end of October and Q4 at the end of January.
 import { config } from '../config.js';
 import { listActiveSubscriptions, logReportRun } from '../services/subscriptions.js';
 import { getUserById, userAllowedGroups } from '../services/users.js';
 import { buildReport, reportTitle } from '../services/reports/index.js';
-import { expandFormats } from '../services/reports/select.js';
+import { expandFormats, type ReportCadence } from '../services/reports/select.js';
 import { isMailConfigured, sendMail } from '../services/mailer.js';
 import { fmtDate } from '../services/reports/format.js';
-import { isLastWorkingDayOfMonth, previousMonthRange } from '../services/workdays.js';
+import { isLastWorkingDayOfMonth, periodForCadence } from '../services/workdays.js';
 import { GROUP_LABELS, type MachineGroup } from '../services/groups.js';
 
 export interface RunResult {
   ran: boolean;
+  cadence: ReportCadence;
   reason?: string;
   from?: string;
   to?: string;
+  /** 'Q1 2026' on a quarterly run; absent for monthly, where the dates say it all. */
+  periodLabel?: string;
   sent: number;
   failed: number;
   skipped: number;
@@ -40,23 +47,36 @@ function domainAllowed(address: string): boolean {
 }
 
 /**
- * Build and send every active subscription for the previous month.
+ * Build and send every active subscription of one cadence, for the period that
+ * cadence has just completed.
  *
+ * @param opts.cadence  'monthly' (previous month) or 'quarterly' (previous quarter)
  * @param opts.force    run regardless of the calendar (manual "run now")
  * @param opts.dryRun   build everything but send nothing — used to verify a run
  *                      without mailing anyone
  * @param opts.now      pretend it is this date (testing)
  */
-export async function runMonthlyReports(opts: {
+export async function runScheduledReports(opts: {
+  cadence?: ReportCadence;
   force?: boolean;
   dryRun?: boolean;
   now?: Date;
 } = {}): Promise<RunResult> {
+  const cadence = opts.cadence ?? 'monthly';
   const now = opts.now ?? new Date();
-  const result: RunResult = { ran: false, sent: 0, failed: 0, skipped: 0, details: [] };
+  const result: RunResult = { ran: false, cadence, sent: 0, failed: 0, skipped: 0, details: [] };
 
   if (!opts.force && !isLastWorkingDayOfMonth(now)) {
     result.reason = 'nije zadnji radni dan u mjesecu';
+    return result;
+  }
+
+  // A forced quarterly run falls back to the last quarter that has fully ended,
+  // so an admin can test it on any day of the year; a scheduled one only
+  // proceeds in the month right after a quarter closes.
+  const period = periodForCadence(now, cadence, opts.force === true);
+  if (!period) {
+    result.reason = 'prethodni mjesec nije kraj kvartala';
     return result;
   }
   if (!opts.dryRun && !isMailConfigured()) {
@@ -64,16 +84,26 @@ export async function runMonthlyReports(opts: {
     return result;
   }
 
-  const { from, to } = previousMonthRange(now);
+  const { from, to } = period;
   result.ran = true;
   result.from = from;
   result.to = to;
+  if (period.label) result.periodLabel = period.label;
 
-  const subs = listActiveSubscriptions();
+  const subs = listActiveSubscriptions(cadence);
   if (subs.length === 0) {
     result.reason = 'nema aktivnih pretplata';
     return result;
   }
+
+  // How the period is named in the subject and in the body. A quarter carries
+  // its label ("Q1 2026") as well as the dates; a month is only ever the dates.
+  const periodText = period.label
+    ? `${period.label} (${fmtDate(from)} – ${fmtDate(to)})`
+    : `${fmtDate(from)} – ${fmtDate(to)}`;
+  const periodPhrase = period.label
+    ? `kvartal ${period.label} (${fmtDate(from)} – ${fmtDate(to)})`
+    : `razdoblje ${fmtDate(from)} – ${fmtDate(to)}`;
 
   // Reports are identical for any two subscribers with the same type, format and
   // visible groups, so build once and reuse — the fuel report is the slow part.
@@ -141,15 +171,13 @@ export async function runMonthlyReports(opts: {
         }
 
         const title = reportTitle(sub.reportType);
-        const subject = `${title} · ${label} · ${fmtDate(from)} – ${fmtDate(to)}`;
+        const subject = `${title} · ${label} · ${periodText}`;
         if (!opts.dryRun) {
           await sendMail({
             to: [sub.username],
             subject,
             text:
-              `U prilogu je ${title.toLowerCase()} za ${label}, razdoblje ${fmtDate(from)} – ${fmtDate(to)}.
-
-` +
+              `U prilogu je ${title.toLowerCase()} za ${label}, ${periodPhrase}.\n\n` +
               'Logirajte se na aplikaciju preko linka https://koteks-gorivo.netlify.app/.\n' +
               'Ako nemate podatke za prijavu javite se Marku 🙂\n\n' +
               'Ovo je automatska poruka iz aplikacije Koteks Gorivo.',
@@ -164,6 +192,7 @@ export async function runMonthlyReports(opts: {
             periodTo: to,
             recipient: sub.username,
             reportType: `${sub.reportType} (${label})`,
+            cadence,
             format: sub.format,
             status: 'success',
           });
@@ -183,6 +212,7 @@ export async function runMonthlyReports(opts: {
           periodTo: to,
           recipient: sub.username,
           reportType: sub.reportType,
+          cadence,
           format: sub.format,
           status: 'error',
           message,
@@ -192,4 +222,18 @@ export async function runMonthlyReports(opts: {
   }
 
   return result;
+}
+
+/**
+ * The daily job. Runs both cadences and lets each decide whether it is due:
+ * monthly on the last working day of every month, quarterly only when the month
+ * that just ended also closed a quarter.
+ */
+export async function runDueReports(now?: Date): Promise<RunResult[]> {
+  const cadences: ReportCadence[] = ['monthly', 'quarterly'];
+  const results: RunResult[] = [];
+  for (const cadence of cadences) {
+    results.push(await runScheduledReports({ cadence, now }));
+  }
+  return results;
 }

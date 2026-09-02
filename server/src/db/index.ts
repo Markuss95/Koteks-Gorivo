@@ -113,15 +113,18 @@ export function initSchema(): void {
       fetched_at TEXT NOT NULL
     );
 
-    -- Who receives which report automatically, on the last working day of each month.
+    -- Who receives which report automatically, on the last working day of the
+    -- month. Monthly subscriptions cover the previous month; quarterly ones the
+    -- previous quarter, and only go out in April, July, October and January.
     CREATE TABLE IF NOT EXISTS report_subscription (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
       report_type TEXT NOT NULL,               -- 'fuel' | 'activity'
+      cadence     TEXT NOT NULL DEFAULT 'monthly', -- 'monthly' | 'quarterly'
       format      TEXT NOT NULL DEFAULT 'pdf', -- 'pdf' | 'excel'
       active      INTEGER NOT NULL DEFAULT 1,
       created_at  TEXT NOT NULL,
-      UNIQUE (user_id, report_type)            -- one row per user per report kind
+      UNIQUE (user_id, report_type, cadence)   -- one row per user, kind and cadence
     );
 
     -- One row per scheduled send attempt, so failures are visible rather than silent.
@@ -134,7 +137,8 @@ export function initSchema(): void {
       report_type   TEXT NOT NULL,
       format        TEXT NOT NULL,
       status        TEXT NOT NULL,             -- success | error
-      message       TEXT
+      message       TEXT,
+      cadence       TEXT NOT NULL DEFAULT 'monthly'
     );
   `);
 
@@ -154,6 +158,50 @@ export function initSchema(): void {
     (db.prepare('PRAGMA table_info(user)').all() as Array<{ name: string }>).map((c) => c.name),
   );
   if (!userCols.has('allowed_groups')) db.exec('ALTER TABLE user ADD COLUMN allowed_groups TEXT');
+
+  // Subscriptions gained a cadence, which widened the uniqueness rule from
+  // (user, report type) to (user, report type, cadence). SQLite can't alter a
+  // constraint in place, so an older database gets a table rebuild; every row it
+  // already holds is a monthly one.
+  const subCols = new Set(
+    (db.prepare('PRAGMA table_info(report_subscription)').all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    ),
+  );
+  if (!subCols.has('cadence')) {
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE report_subscription_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+            report_type TEXT NOT NULL,
+            cadence     TEXT NOT NULL DEFAULT 'monthly',
+            format      TEXT NOT NULL DEFAULT 'pdf',
+            active      INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT NOT NULL,
+            UNIQUE (user_id, report_type, cadence)
+          );
+          INSERT INTO report_subscription_new
+            (id, user_id, report_type, cadence, format, active, created_at)
+            SELECT id, user_id, report_type, 'monthly', format, active, created_at
+            FROM report_subscription;
+          DROP TABLE report_subscription;
+          ALTER TABLE report_subscription_new RENAME TO report_subscription;
+        `);
+      })();
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  }
+
+  const logCols = new Set(
+    (db.prepare('PRAGMA table_info(report_log)').all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!logCols.has('cadence')) {
+    db.exec("ALTER TABLE report_log ADD COLUMN cadence TEXT NOT NULL DEFAULT 'monthly'");
+  }
 }
 
 // ---- Settings helpers ----

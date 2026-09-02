@@ -62,7 +62,7 @@ services:
       - key: CORS_ORIGIN
         sync: false
 
-      # ---- E-mail (Microsoft Graph) + automatic monthly reports ----
+      # ---- E-mail (Microsoft Graph) + automatic monthly/quarterly reports ----
       # Tenant and client IDs are public identifiers (they appear in OAuth URLs),
       # so they live here; only the client secret is entered in the dashboard.
       - key: GRAPH_TENANT_ID
@@ -80,6 +80,8 @@ services:
       - key: MAIL_ALLOWED_DOMAINS
         value: "osijek-koteks.hr,velicki-kamen.hr,kamen-psunj.hr,abgtest.hr,molaris.hr,prodorina.hr,r-promet.hr"
       # Daily check; only the last working day of the month actually sends.
+      # Monthly subscriptions go out then; quarterly ones only in April, July,
+      # October and January (the month after each quarter ends).
       - key: REPORT_CRON
         value: "0 6 * * *"
       - key: REPORT_SCHEDULE_ENABLED

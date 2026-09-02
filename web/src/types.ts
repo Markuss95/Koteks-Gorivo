@@ -188,6 +188,8 @@ export interface MachineSeries {
 }
 
 export type ReportType = 'fuel' | 'activity';
+/** How often a subscription is sent: the previous month, or the previous quarter. */
+export type ReportCadence = 'monthly' | 'quarterly';
 /** A single produced file. */
 export type ReportFormat = 'pdf' | 'excel';
 /** What the user picked — 'both' produces one file of each. */
@@ -209,6 +211,7 @@ export interface ReportSubscription {
   userId: number;
   username: string;
   reportType: ReportType;
+  cadence: ReportCadence;
   format: FormatChoice;
   active: boolean;
   createdAt: string;
@@ -221,6 +224,7 @@ export interface ReportLogEntry {
   period_to: string;
   recipient: string;
   report_type: string;
+  cadence: string;
   format: string;
   status: string;
   message: string | null;
@@ -228,9 +232,12 @@ export interface ReportLogEntry {
 
 export interface ReportRunResult {
   ran: boolean;
+  cadence: ReportCadence;
   reason?: string;
   from?: string;
   to?: string;
+  /** 'Q1 2026' on a quarterly run; absent for monthly. */
+  periodLabel?: string;
   sent: number;
   failed: number;
   skipped: number;

@@ -26,7 +26,7 @@ import {
 import { buildReport, reportTitle } from './services/reports/index.js';
 import { expandFormats } from './services/reports/select.js';
 import { fmtDate } from './services/reports/format.js';
-import { runMonthlyReports } from './sync/reportSchedule.js';
+import { runScheduledReports } from './sync/reportSchedule.js';
 import type { MachineGroup } from './services/groups.js';
 
 export const api = Router();
@@ -492,6 +492,7 @@ api.post('/reports/email', adminOnly, async (req, res) => {
 const subscriptionSchema = z.object({
   userId: z.number().int().positive(),
   reportType: z.enum(['fuel', 'activity']),
+  cadence: z.enum(['monthly', 'quarterly']),
   format: z.enum(['pdf', 'excel', 'both']),
   active: z.boolean(),
 });
@@ -524,13 +525,24 @@ api.delete('/report-subscriptions/:id', adminOnly, (req, res) => {
 });
 
 /**
- * Manual trigger for the monthly run, so an admin can verify the whole pipeline
- * without waiting for month end. `dryRun` builds everything and sends nothing.
+ * Manual trigger for a scheduled run, so an admin can verify the whole pipeline
+ * without waiting for month end. `dryRun` builds everything and sends nothing;
+ * a forced quarterly run uses the last quarter that has fully ended.
  */
+const runSchema = z.object({
+  dryRun: z.boolean().optional(),
+  cadence: z.enum(['monthly', 'quarterly']).optional(),
+});
+
 api.post('/report-subscriptions/run', adminOnly, async (req, res) => {
-  const dryRun = req.body?.dryRun === true;
+  const parse = runSchema.safeParse(req.body ?? {});
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  const { dryRun = false, cadence = 'monthly' } = parse.data;
   try {
-    const result = await runMonthlyReports({ force: true, dryRun });
+    const result = await runScheduledReports({ force: true, dryRun, cadence });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

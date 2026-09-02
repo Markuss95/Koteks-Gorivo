@@ -2,6 +2,7 @@ import type {
   AuthUser,
   ComparisonResult,
   FormatChoice,
+  ReportCadence,
   ReportLogEntry,
   ReportRequest,
   ReportRunResult,
@@ -156,6 +157,7 @@ export const api = {
   saveSubscription: (input: {
     userId: number;
     reportType: ReportType;
+    cadence: ReportCadence;
     format: FormatChoice;
     active: boolean;
   }) =>
@@ -164,6 +166,6 @@ export const api = {
     ),
   deleteSubscription: (id: number) =>
     send<{ ok: boolean }>(`/api/report-subscriptions/${id}`, 'DELETE'),
-  runSubscriptions: (dryRun: boolean) =>
-    send<ReportRunResult>('/api/report-subscriptions/run', 'POST', { dryRun }),
+  runSubscriptions: (dryRun: boolean, cadence: ReportCadence) =>
+    send<ReportRunResult>('/api/report-subscriptions/run', 'POST', { dryRun, cadence }),
 };

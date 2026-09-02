@@ -8,6 +8,16 @@ import type { MachineUtilization } from '../utilization.js';
 import type { MachineGroup } from '../groups.js';
 
 export type ReportType = 'fuel' | 'activity';
+/**
+ * How often a subscription is sent. 'monthly' covers the previous calendar
+ * month; 'quarterly' covers the previous calendar quarter (Q1 = Jan–Mar, and so
+ * on) and only goes out in the month after that quarter ends.
+ */
+export type ReportCadence = 'monthly' | 'quarterly';
+export const CADENCE_LABELS: Record<ReportCadence, string> = {
+  monthly: 'mjesečni',
+  quarterly: 'kvartalni',
+};
 /** A single produced file. */
 export type ReportFormat = 'pdf' | 'excel';
 /** What the user picked — 'both' fans out to one file of each. */

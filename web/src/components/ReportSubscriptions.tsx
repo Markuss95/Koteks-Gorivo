@@ -3,6 +3,7 @@ import { api } from '../api';
 import type {
   ManagedUser,
   FormatChoice,
+  ReportCadence,
   ReportLogEntry,
   ReportRunResult,
   ReportSubscription,
@@ -15,9 +16,16 @@ const TYPES: Array<{ key: ReportType; label: string }> = [
   { key: 'activity', label: 'Aktivnost' },
 ];
 
+const CADENCES: Array<{ key: ReportCadence; label: string }> = [
+  { key: 'monthly', label: 'Mjesečno' },
+  { key: 'quarterly', label: 'Kvartalno' },
+];
+
 /**
- * Admin panel: who receives which report automatically on the last working day
- * of each month. One row per user, one toggle + format per report kind.
+ * Admin panel: who receives which report automatically. Monthly subscriptions go
+ * out on the last working day of every month and cover the previous month;
+ * quarterly ones go out in April, July, October and January and cover the
+ * quarter that ended a month earlier.
  */
 export function ReportSubscriptions() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -27,6 +35,7 @@ export function ReportSubscriptions() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<ReportRunResult | null>(null);
+  const [runCadence, setRunCadence] = useState<ReportCadence>('monthly');
 
   const load = () =>
     Promise.all([api.users(), api.reportSubscriptions()])
@@ -43,18 +52,24 @@ export function ReportSubscriptions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const find = (userId: number, type: ReportType) =>
-    subs.find((s) => s.userId === userId && s.reportType === type);
+  const find = (userId: number, type: ReportType, cadence: ReportCadence) =>
+    subs.find((s) => s.userId === userId && s.reportType === type && s.cadence === cadence);
 
-  const save = async (userId: number, reportType: ReportType, patch: Partial<ReportSubscription>) => {
-    const existing = find(userId, reportType);
-    const key = `${userId}-${reportType}`;
+  const save = async (
+    userId: number,
+    reportType: ReportType,
+    cadence: ReportCadence,
+    patch: Partial<ReportSubscription>,
+  ) => {
+    const existing = find(userId, reportType, cadence);
+    const key = `${userId}-${reportType}-${cadence}`;
     setBusy(key);
     setError(null);
     try {
       await api.saveSubscription({
         userId,
         reportType,
+        cadence,
         format: patch.format ?? existing?.format ?? 'pdf',
         active: patch.active ?? existing?.active ?? false,
       });
@@ -67,13 +82,14 @@ export function ReportSubscriptions() {
   };
 
   // Dry run builds every subscriber's report but sends nothing — the safe way to
-  // confirm the schedule works without mailing anyone.
+  // confirm the schedule works without mailing anyone. A forced quarterly run
+  // uses the last quarter that has fully ended, so it can be tested any day.
   const run = async (dryRun: boolean) => {
     setBusy('run');
     setError(null);
     setRunResult(null);
     try {
-      setRunResult(await api.runSubscriptions(dryRun));
+      setRunResult(await api.runSubscriptions(dryRun, runCadence));
       if (!dryRun) await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -87,8 +103,19 @@ export function ReportSubscriptions() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <h2>Automatski mjesečni izvještaji</h2>
+        <h2>Automatski izvještaji</h2>
         <div className="panel-actions">
+          <select
+            value={runCadence}
+            onChange={(e) => setRunCadence(e.target.value as ReportCadence)}
+            disabled={busy !== null}
+          >
+            {CADENCES.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
           <button className="btn secondary" onClick={() => run(true)} disabled={busy !== null}>
             {busy === 'run' ? 'Provjera…' : 'Probni prolaz (bez slanja)'}
           </button>
@@ -99,9 +126,13 @@ export function ReportSubscriptions() {
       </div>
 
       <div className="muted" style={{ marginBottom: 12 }}>
-        Izvještaji se šalju automatski zadnji radni dan u mjesecu i pokrivaju cijeli
-        prethodni mjesec. Primatelj vidi samo grupe koje su mu dodijeljene, a za
-        svaku grupu dobiva zasebnu poruku.
+        <strong>Mjesečno:</strong> šalje se zadnji radni dan u mjesecu i pokriva cijeli
+        prethodni mjesec.{' '}
+        <strong>Kvartalno:</strong> pokriva cijeli kvartal, a šalje se zadnji radni dan
+        mjeseca nakon njegova završetka — Q1 (siječanj–ožujak) krajem travnja, Q2
+        (travanj–lipanj) krajem srpnja, Q3 (srpanj–rujan) krajem listopada i Q4
+        (listopad–prosinac) krajem siječnja. Primatelj vidi samo grupe koje su mu
+        dodijeljene, a za svaku grupu dobiva zasebnu poruku.
       </div>
 
       {error && <div className="error-box">{error}</div>}
@@ -110,7 +141,8 @@ export function ReportSubscriptions() {
         <div className={runResult.failed > 0 ? 'error-box' : 'ok-box'}>
           {runResult.ran ? (
             <>
-              Razdoblje {runResult.from} – {runResult.to}: poslano {runResult.sent}, greška{' '}
+              Razdoblje {runResult.periodLabel ? `${runResult.periodLabel}: ` : ''}
+              {runResult.from} – {runResult.to}: poslano {runResult.sent}, greška{' '}
               {runResult.failed}, preskočeno {runResult.skipped}.
               {runResult.details.length > 0 && (
                 <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
@@ -132,10 +164,17 @@ export function ReportSubscriptions() {
       <table>
         <thead>
           <tr>
-            <th>Korisnik</th>
-            {TYPES.map((t) => (
-              <th key={t.key}>{t.label}</th>
+            <th rowSpan={2}>Korisnik</th>
+            {CADENCES.map((c) => (
+              <th key={c.key} colSpan={TYPES.length} style={{ textAlign: 'center' }}>
+                {c.label}
+              </th>
             ))}
+          </tr>
+          <tr>
+            {CADENCES.flatMap((c) =>
+              TYPES.map((t) => <th key={`${c.key}-${t.key}`}>{t.label}</th>),
+            )}
           </tr>
         </thead>
         <tbody>
@@ -145,34 +184,36 @@ export function ReportSubscriptions() {
                 <strong>{u.username}</strong>
                 {u.role === 'admin' && <span className="pill">admin</span>}
               </td>
-              {TYPES.map((t) => {
-                const sub = find(u.id, t.key);
-                const key = `${u.id}-${t.key}`;
-                return (
-                  <td key={t.key}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={sub?.active ?? false}
-                        disabled={busy !== null}
-                        onChange={(e) => save(u.id, t.key, { active: e.target.checked })}
-                      />
-                      <select
-                        value={sub?.format ?? 'pdf'}
-                        disabled={busy !== null || !(sub?.active ?? false)}
-                        onChange={(e) =>
-                          save(u.id, t.key, { format: e.target.value as FormatChoice })
-                        }
-                      >
-                        <option value="pdf">PDF</option>
-                        <option value="excel">Excel</option>
-                        <option value="both">PDF i Excel</option>
-                      </select>
-                      {busy === key && <span className="muted">…</span>}
-                    </label>
-                  </td>
-                );
-              })}
+              {CADENCES.flatMap((c) =>
+                TYPES.map((t) => {
+                  const sub = find(u.id, t.key, c.key);
+                  const key = `${u.id}-${t.key}-${c.key}`;
+                  return (
+                    <td key={key}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={sub?.active ?? false}
+                          disabled={busy !== null}
+                          onChange={(e) => save(u.id, t.key, c.key, { active: e.target.checked })}
+                        />
+                        <select
+                          value={sub?.format ?? 'pdf'}
+                          disabled={busy !== null || !(sub?.active ?? false)}
+                          onChange={(e) =>
+                            save(u.id, t.key, c.key, { format: e.target.value as FormatChoice })
+                          }
+                        >
+                          <option value="pdf">PDF</option>
+                          <option value="excel">Excel</option>
+                          <option value="both">PDF i Excel</option>
+                        </select>
+                        {busy === key && <span className="muted">…</span>}
+                      </label>
+                    </td>
+                  );
+                }),
+              )}
             </tr>
           ))}
         </tbody>
@@ -198,6 +239,7 @@ export function ReportSubscriptions() {
                   <td>{l.recipient}</td>
                   <td className="muted">
                     {l.report_type}/{l.format}
+                    {l.cadence === 'quarterly' && <span className="pill">kvartalno</span>}
                   </td>
                   <td className="muted">
                     {l.period_from} – {l.period_to}
