@@ -1,6 +1,7 @@
 # Netlify config for the frontend (web workspace).
 # In the Netlify dashboard set the build env var:
 #   VITE_API_BASE_URL = https://<your-render-service>.onrender.com
+#   VITE_CARTO_API_KEY = <CARTO basemap key>
 [build]
   base = "web"
   command = "npm run build"

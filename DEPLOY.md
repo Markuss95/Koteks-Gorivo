@@ -33,6 +33,7 @@ Browser ──> Netlify (React static site) ──HTTPS──> Render (Node API 
    [`web/netlify.toml`](web/netlify.toml) (base `web`, publish `dist`).
 2. Add a build environment variable:
    - `VITE_API_BASE_URL = https://koteks-gorivo-api.onrender.com` (your Render URL from step 1)
+   - `VITE_CARTO_API_KEY = <your key>` — map tiles; free key from https://carto.com/basemaps/apikey
 3. Deploy. Note the site URL, e.g. `https://koteks-gorivo.netlify.app`.
 
 ## 3. Lock CORS to your site

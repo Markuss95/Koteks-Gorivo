@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import { MapContainer, Marker, useMap } from 'react-leaflet';
+import { BaseTileLayer } from './BaseTileLayer';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { MachinePosition } from '../types';
@@ -114,10 +115,7 @@ export function MachinesMap({
             scrollWheelZoom
             style={{ height: '100%', width: '100%' }}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            />
+            <BaseTileLayer />
             <MapController points={points} focus={focus} />
             {positions.map((p) => (
               <Marker
