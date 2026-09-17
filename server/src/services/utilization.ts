@@ -1,5 +1,6 @@
 import { db } from '../db/index.js';
 import { listMachines } from './machines.js';
+import { baselineFloorIso } from './readings.js';
 
 export interface MachineUtilization {
   serialNumber: string;
@@ -51,10 +52,10 @@ function hoursDelta(serial: string, metric: 'operating' | 'idle', fromIso: strin
   let base = db
     .prepare(
       `SELECT hours_cum v FROM lidat_hours_reading
-       WHERE serial_number=? AND metric=? AND reading_time<?
+       WHERE serial_number=? AND metric=? AND reading_time<? AND reading_time>=?
        ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, metric, fromIso) as { v: number } | undefined;
+    .get(serial, metric, fromIso, baselineFloorIso(fromIso)) as { v: number } | undefined;
   let partial = false;
   if (!base) {
     base = db
@@ -66,7 +67,11 @@ function hoursDelta(serial: string, metric: 'operating' | 'idle', fromIso: strin
       .get(serial, metric, fromIso, toIso) as { v: number } | undefined;
     partial = true;
   }
-  if (!base) return { value: null as number | null, partial: false };
+  if (!base) {
+    // Silent throughout (no recent pre-range reading, none inside): counter didn't move.
+    base = end;
+    partial = false;
+  }
   return { value: Math.max(0, end.v - base.v), partial };
 }
 
@@ -81,9 +86,9 @@ function fuelDelta(serial: string, fromIso: string, toIso: string): number | nul
   let base = db
     .prepare(
       `SELECT fuel_consumed_cum v FROM lidat_fuel_reading
-       WHERE serial_number=? AND reading_time<? ORDER BY reading_time DESC LIMIT 1`,
+       WHERE serial_number=? AND reading_time<? AND reading_time>=? ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, fromIso) as { v: number } | undefined;
+    .get(serial, fromIso, baselineFloorIso(fromIso)) as { v: number } | undefined;
   if (!base) {
     base = db
       .prepare(
@@ -92,7 +97,8 @@ function fuelDelta(serial: string, fromIso: string, toIso: string): number | nul
       )
       .get(serial, fromIso, toIso) as { v: number } | undefined;
   }
-  if (!base) return null;
+  // Silent throughout (no recent pre-range reading, none inside): counter didn't move.
+  if (!base) base = end;
   return Math.max(0, end.v - base.v);
 }
 
@@ -192,15 +198,15 @@ export interface UtilizationSeriesPoint {
   fuelLitres: number | null;
 }
 
-/** Last cumulative value strictly before `beforeIso` for an hours metric. */
+/** Last cumulative value strictly before `beforeIso` (and recent enough) for an hours metric. */
 function hoursCumBefore(serial: string, metric: 'operating' | 'idle', beforeIso: string): number | null {
   const r = db
     .prepare(
       `SELECT hours_cum v FROM lidat_hours_reading
-       WHERE serial_number=? AND metric=? AND reading_time<?
+       WHERE serial_number=? AND metric=? AND reading_time<? AND reading_time>=?
        ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, metric, beforeIso) as { v: number } | undefined;
+    .get(serial, metric, beforeIso, baselineFloorIso(beforeIso)) as { v: number } | undefined;
   return r ? r.v : null;
 }
 
@@ -265,9 +271,9 @@ export function buildMachineSeries(
     db
       .prepare(
         `SELECT fuel_consumed_cum v FROM lidat_fuel_reading
-         WHERE serial_number=? AND reading_time<? ORDER BY reading_time DESC LIMIT 1`,
+         WHERE serial_number=? AND reading_time<? AND reading_time>=? ORDER BY reading_time DESC LIMIT 1`,
       )
-      .get(serial, fromIso) as { v: number } | undefined
+      .get(serial, fromIso, baselineFloorIso(fromIso)) as { v: number } | undefined
   )?.v ?? null;
   const fuelDaily = dailyDeltas(fuelByDay, fuelBaseline);
 

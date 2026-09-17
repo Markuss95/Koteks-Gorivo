@@ -60,11 +60,11 @@ export function MachineDetail({
   }, [serial, mapDate]);
 
   // Both series rebased to cumulative-since-period-start so they share a scale:
-  // LiDAT = consumed since the first reading, Maris = running sum of issuances.
+  // LiDAT = consumed since the period baseline, Maris = running sum of issuances.
   const chartData = useMemo(() => {
     if (!data) return [];
     const lidat = data.lidatReadings;
-    const lidatBase = lidat.length ? lidat[0].fuelConsumedCum : 0;
+    const lidatBase = data.lidat.baselineCum ?? (lidat.length ? lidat[0].fuelConsumedCum : 0);
     const lidatByTime = new Map(
       lidat.map((r) => [new Date(r.time).getTime(), r.fuelConsumedCum - lidatBase]),
     );
@@ -87,20 +87,6 @@ export function MachineDetail({
   }, [data]);
 
   const marisTotal = data?.marisItems.reduce((s, i) => s + (i.kolicina || 0), 0) ?? 0;
-
-  // LiDAT consumed over the period = span of the cumulative-fuel readings
-  // (last − first). Cumulative fuel is monotonic, so max − min is the total.
-  const lidatTotal = (() => {
-    const rs = data?.lidatReadings ?? [];
-    if (rs.length < 2) return 0;
-    let min = Infinity;
-    let max = -Infinity;
-    for (const r of rs) {
-      if (r.fuelConsumedCum < min) min = r.fuelConsumedCum;
-      if (r.fuelConsumedCum > max) max = r.fuelConsumedCum;
-    }
-    return max - min;
-  })();
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
@@ -140,7 +126,9 @@ export function MachineDetail({
               </div>
               <div className="card">
                 <div className="label">LiDAT potrošeno</div>
-                <div className="value lidat">{fmt(lidatTotal, 1)} L</div>
+                <div className="value lidat">
+                  {data.lidat.consumedLitres === null ? '—' : `${fmt(data.lidat.consumedLitres, 1)} L`}
+                </div>
                 <div className="sub">{data.lidatReadings.length} očitanja</div>
               </div>
             </div>

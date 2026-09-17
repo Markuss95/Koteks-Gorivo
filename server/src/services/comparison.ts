@@ -3,6 +3,7 @@ import { getJsonSetting } from '../db/index.js';
 import { config } from '../config.js';
 import { marisFetchItems, toMarisDate, type MarisItem } from '../maris/client.js';
 import { listMachines } from './machines.js';
+import { baselineFloorIso } from './readings.js';
 
 export interface MachineComparison {
   serialNumber: string;
@@ -57,12 +58,13 @@ function cumAtOrBefore(serial: string, boundaryIso: string): number | null {
   return row ? row.fuel_consumed_cum : null;
 }
 
-function lidatConsumption(
+export function lidatConsumption(
   serial: string,
   fromIso: string,
   toIso: string,
 ): {
   consumed: number | null;
+  baselineCum: number | null;
   baselineTime: string | null;
   endTime: string | null;
   countInRange: number;
@@ -77,14 +79,16 @@ function lidatConsumption(
     )
     .get(serial, toIso) as { reading_time: string; fuel_consumed_cum: number } | undefined;
 
-  // Baseline: last cumulative reading strictly before `from`.
+  // Baseline: last cumulative reading strictly before `from`, if recent enough.
   const baseRow = db
     .prepare(
       `SELECT reading_time, fuel_consumed_cum FROM lidat_fuel_reading
-       WHERE serial_number = ? AND reading_time < ?
+       WHERE serial_number = ? AND reading_time < ? AND reading_time >= ?
        ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, fromIso) as { reading_time: string; fuel_consumed_cum: number } | undefined;
+    .get(serial, fromIso, baselineFloorIso(fromIso)) as
+    | { reading_time: string; fuel_consumed_cum: number }
+    | undefined;
 
   const countInRange = (
     db
@@ -96,13 +100,13 @@ function lidatConsumption(
   ).c;
 
   if (!endRow) {
-    return { consumed: null, baselineTime: null, endTime: null, countInRange, partial: false };
+    return { consumed: null, baselineCum: null, baselineTime: null, endTime: null, countInRange, partial: false };
   }
 
   let baseline = baseRow;
   let partial = false;
   if (!baseline) {
-    // No reading before the range: use the earliest reading within range as baseline.
+    // No (recent) reading before the range: use the earliest reading within range as baseline.
     baseline = db
       .prepare(
         `SELECT reading_time, fuel_consumed_cum FROM lidat_fuel_reading
@@ -116,18 +120,16 @@ function lidatConsumption(
   }
 
   if (!baseline) {
-    return {
-      consumed: null,
-      baselineTime: null,
-      endTime: endRow.reading_time,
-      countInRange,
-      partial: false,
-    };
+    // Nothing recent before the range and nothing inside it: the machine was
+    // silent throughout, so the end reading (an old one) is its own baseline → 0.
+    baseline = endRow;
+    partial = false;
   }
 
   const consumed = Math.max(0, endRow.fuel_consumed_cum - baseline.fuel_consumed_cum);
   return {
     consumed,
+    baselineCum: baseline.fuel_consumed_cum,
     baselineTime: baseline.reading_time,
     endTime: endRow.reading_time,
     countInRange,

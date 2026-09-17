@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db, getJsonSetting, setJsonSetting } from './db/index.js';
 import { config } from './config.js';
 import { listMachines, listMachinePositions, machineGroupsMap } from './services/machines.js';
-import { buildComparison, getFuelArticleCodes } from './services/comparison.js';
+import { buildComparison, getFuelArticleCodes, lidatConsumption } from './services/comparison.js';
 import { buildUtilization, buildMachineSeries } from './services/utilization.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
@@ -198,6 +198,8 @@ api.get('/machines/:serial/series', async (req, res) => {
   }
   marisItems.sort((a, b) => a.datum.localeCompare(b.datum));
 
+  const lidat = lidatConsumption(serial, `${from}T00:00:00Z`, `${to}T23:59:59Z`);
+
   res.json({
     machine: {
       serialNumber: machine.serial_number,
@@ -207,6 +209,12 @@ api.get('/machines/:serial/series', async (req, res) => {
       latitude: machine.latitude ?? null,
       longitude: machine.longitude ?? null,
       locationTime: machine.location_time ?? null,
+    },
+    // Same figure as the comparison table, so the modal can't disagree with it.
+    lidat: {
+      consumedLitres: lidat.consumed,
+      baselineCum: lidat.baselineCum,
+      partial: lidat.partial,
     },
     lidatReadings: readings.map((r) => ({
       time: r.reading_time,

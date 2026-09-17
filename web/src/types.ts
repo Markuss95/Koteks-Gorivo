@@ -171,6 +171,8 @@ export interface MachineSeries {
     longitude: number | null;
     locationTime: string | null;
   };
+  // Period consumption computed on the server exactly like the comparison table.
+  lidat: { consumedLitres: number | null; baselineCum: number | null; partial: boolean };
   lidatReadings: Array<{ time: string; fuelConsumedCum: number; fuelUnits: string | null }>;
   marisItems: Array<{
     datum: string;
