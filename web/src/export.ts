@@ -116,11 +116,18 @@ const EXCLUDED_COLUMNS = [
 export function groupExcluded(
   excluded: MachineComparison[],
 ): Array<{ title: string; note: string; rows: MachineComparison[] }> {
+  // Both sides present but still excluded → LiDAT doesn't cover the whole range.
+  const partial = excluded.filter((m) => hasMaris(m) && hasLidat(m));
   const marisOnly = excluded.filter((m) => hasMaris(m) && !hasLidat(m));
   const lidatOnly = excluded.filter((m) => !hasMaris(m) && hasLidat(m));
   const neither = excluded.filter((m) => !hasMaris(m) && !hasLidat(m));
 
   return [
+    {
+      title: `Nepotpuni LiDAT podaci — stroj se nije javljao cijelo razdoblje (${partial.length})`,
+      note: 'LiDAT očitanja pokrivaju samo dio razdoblja, pa potrošnja nije usporediva s izdanim gorivom — provjeriti javlja li se stroj.',
+      rows: partial,
+    },
     {
       title: `Samo Maris izdanje — nema LiDAT potrošnje (${marisOnly.length})`,
       note: 'Gorivo je izdano iz skladišta, ali LiDAT nije zabilježio potrošnju — provjeriti javlja li se stroj.',

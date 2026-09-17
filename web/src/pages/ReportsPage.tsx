@@ -27,10 +27,16 @@ type Format = 'pdf' | 'excel' | 'both';
 type Scope = 'matched' | 'all';
 
 // A machine "has both entries" when Maris issued fuel for it AND LiDAT reported
-// real consumption — the same pairing the comparison page uses for its matched
-// totals, so a machine missing one side can't skew the report.
+// real consumption over the whole range (not lidatPartial) — the same pairing the
+// comparison page uses for its matched totals, so a machine missing one side
+// can't skew the report.
 function hasBothEntries(m: MachineComparison): boolean {
-  return m.marisIssuedLitres > 0 && m.lidatConsumedLitres !== null && m.lidatConsumedLitres > 0;
+  return (
+    m.marisIssuedLitres > 0 &&
+    m.lidatConsumedLitres !== null &&
+    m.lidatConsumedLitres > 0 &&
+    !m.lidatPartial
+  );
 }
 
 // Deliberately permissive: real-world addresses vary far more than strict RFC

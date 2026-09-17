@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { listMachines } from './machines.js';
-import { baselineFloorIso } from './readings.js';
+import { boundaryFloorIso } from './readings.js';
 
 export interface MachineUtilization {
   serialNumber: string;
@@ -39,7 +39,8 @@ export interface UtilizationResult {
 }
 
 // Delta of a cumulative hours counter ('operating' | 'idle') over [from,to],
-// same baseline/end/partial rules as the fuel comparison.
+// same 14-day start-baseline rule as the fuel comparison (which additionally
+// checks the end of the range, because it drops partial machines from totals).
 function hoursDelta(serial: string, metric: 'operating' | 'idle', fromIso: string, toIso: string) {
   const end = db
     .prepare(
@@ -55,7 +56,7 @@ function hoursDelta(serial: string, metric: 'operating' | 'idle', fromIso: strin
        WHERE serial_number=? AND metric=? AND reading_time<? AND reading_time>=?
        ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, metric, fromIso, baselineFloorIso(fromIso)) as { v: number } | undefined;
+    .get(serial, metric, fromIso, boundaryFloorIso(fromIso)) as { v: number } | undefined;
   let partial = false;
   if (!base) {
     base = db
@@ -88,7 +89,7 @@ function fuelDelta(serial: string, fromIso: string, toIso: string): number | nul
       `SELECT fuel_consumed_cum v FROM lidat_fuel_reading
        WHERE serial_number=? AND reading_time<? AND reading_time>=? ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, fromIso, baselineFloorIso(fromIso)) as { v: number } | undefined;
+    .get(serial, fromIso, boundaryFloorIso(fromIso)) as { v: number } | undefined;
   if (!base) {
     base = db
       .prepare(
@@ -206,7 +207,7 @@ function hoursCumBefore(serial: string, metric: 'operating' | 'idle', beforeIso:
        WHERE serial_number=? AND metric=? AND reading_time<? AND reading_time>=?
        ORDER BY reading_time DESC LIMIT 1`,
     )
-    .get(serial, metric, beforeIso, baselineFloorIso(beforeIso)) as { v: number } | undefined;
+    .get(serial, metric, beforeIso, boundaryFloorIso(beforeIso)) as { v: number } | undefined;
   return r ? r.v : null;
 }
 
@@ -273,7 +274,7 @@ export function buildMachineSeries(
         `SELECT fuel_consumed_cum v FROM lidat_fuel_reading
          WHERE serial_number=? AND reading_time<? AND reading_time>=? ORDER BY reading_time DESC LIMIT 1`,
       )
-      .get(serial, fromIso, baselineFloorIso(fromIso)) as { v: number } | undefined
+      .get(serial, fromIso, boundaryFloorIso(fromIso)) as { v: number } | undefined
   )?.v ?? null;
   const fuelDaily = dailyDeltas(fuelByDay, fuelBaseline);
 

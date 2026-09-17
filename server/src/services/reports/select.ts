@@ -31,11 +31,18 @@ export type FuelScope = 'matched' | 'all';
 
 /**
  * A machine "has both entries" when Maris issued fuel for it AND LiDAT reported
- * real consumption. A zero LiDAT reading counts as absent, not as a measured
- * zero — same rule the excluded-machines appendix uses, so the two can't disagree.
+ * real consumption over the WHOLE range. A zero LiDAT reading counts as absent,
+ * not as a measured zero, and a machine that went quiet for part of the range
+ * (lidatPartial) can't be compared against a full range of issuances — same rule
+ * the excluded-machines appendix uses, so the two can't disagree.
  */
 export function hasBothEntries(m: MachineComparison): boolean {
-  return m.marisIssuedLitres > 0 && m.lidatConsumedLitres !== null && m.lidatConsumedLitres > 0;
+  return (
+    m.marisIssuedLitres > 0 &&
+    m.lidatConsumedLitres !== null &&
+    m.lidatConsumedLitres > 0 &&
+    !m.lidatPartial
+  );
 }
 
 export const hasMaris = (m: MachineComparison) => m.marisIssuedLitres > 0;
@@ -116,11 +123,18 @@ export function selectActivity(
 export function groupExcluded(
   excluded: MachineComparison[],
 ): Array<{ title: string; note: string; rows: MachineComparison[] }> {
+  // Both sides present but still excluded → LiDAT doesn't cover the whole range.
+  const partial = excluded.filter((m) => hasMaris(m) && hasLidat(m));
   const marisOnly = excluded.filter((m) => hasMaris(m) && !hasLidat(m));
   const lidatOnly = excluded.filter((m) => !hasMaris(m) && hasLidat(m));
   const neither = excluded.filter((m) => !hasMaris(m) && !hasLidat(m));
 
   return [
+    {
+      title: `Nepotpuni LiDAT podaci — stroj se nije javljao cijelo razdoblje (${partial.length})`,
+      note: 'LiDAT očitanja pokrivaju samo dio razdoblja, pa potrošnja nije usporediva s izdanim gorivom — provjeriti javlja li se stroj.',
+      rows: partial,
+    },
     {
       title: `Samo Maris izdanje — nema LiDAT potrošnje (${marisOnly.length})`,
       note: 'Gorivo je izdano iz skladišta, ali LiDAT nije zabilježio potrošnju — provjeriti javlja li se stroj.',

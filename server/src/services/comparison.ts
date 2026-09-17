@@ -3,7 +3,7 @@ import { getJsonSetting } from '../db/index.js';
 import { config } from '../config.js';
 import { marisFetchItems, toMarisDate, type MarisItem } from '../maris/client.js';
 import { listMachines } from './machines.js';
-import { baselineFloorIso } from './readings.js';
+import { boundaryFloorIso, parkedBetween } from './readings.js';
 
 export interface MachineComparison {
   serialNumber: string;
@@ -21,7 +21,7 @@ export interface MachineComparison {
   lidatBaselineTime: string | null;
   lidatEndTime: string | null;
   lidatReadingsInRange: number;
-  lidatPartial: boolean; // true if no baseline before range start (consumption underestimated)
+  lidatPartial: boolean; // readings don't cover the whole range (quiet at the start or end) → not comparable
   // Derived
   differenceLitres: number | null; // issued - consumed
   variancePct: number | null; // difference / consumed * 100
@@ -71,24 +71,16 @@ export function lidatConsumption(
   partial: boolean;
 } {
   // End value: last cumulative reading at or before `to`.
-  const endRow = db
-    .prepare(
-      `SELECT reading_time, fuel_consumed_cum FROM lidat_fuel_reading
-       WHERE serial_number = ? AND reading_time <= ?
-       ORDER BY reading_time DESC LIMIT 1`,
-    )
-    .get(serial, toIso) as { reading_time: string; fuel_consumed_cum: number } | undefined;
-
-  // Baseline: last cumulative reading strictly before `from`, if recent enough.
-  const baseRow = db
-    .prepare(
-      `SELECT reading_time, fuel_consumed_cum FROM lidat_fuel_reading
-       WHERE serial_number = ? AND reading_time < ? AND reading_time >= ?
-       ORDER BY reading_time DESC LIMIT 1`,
-    )
-    .get(serial, fromIso, baselineFloorIso(fromIso)) as
-    | { reading_time: string; fuel_consumed_cum: number }
-    | undefined;
+  const endRow = fuelRow(serial, 'reading_time <= ? ORDER BY reading_time DESC', toIso);
+  // Neighbours at each boundary: last reading before the range, first inside it,
+  // and first after it.
+  const prevRow = fuelRow(serial, 'reading_time < ? ORDER BY reading_time DESC', fromIso);
+  const firstRow = fuelRow(
+    serial,
+    'reading_time >= ? AND reading_time <= ? ORDER BY reading_time ASC',
+    fromIso,
+    toIso,
+  );
 
   const countInRange = (
     db
@@ -103,27 +95,34 @@ export function lidatConsumption(
     return { consumed: null, baselineCum: null, baselineTime: null, endTime: null, countInRange, partial: false };
   }
 
-  let baseline = baseRow;
-  let partial = false;
-  if (!baseline) {
-    // No (recent) reading before the range: use the earliest reading within range as baseline.
-    baseline = db
-      .prepare(
-        `SELECT reading_time, fuel_consumed_cum FROM lidat_fuel_reading
-         WHERE serial_number = ? AND reading_time >= ? AND reading_time <= ?
-         ORDER BY reading_time ASC LIMIT 1`,
-      )
-      .get(serial, fromIso, toIso) as
-      | { reading_time: string; fuel_consumed_cum: number }
-      | undefined;
-    partial = true;
+  if (!firstRow) {
+    // Nothing inside the range: the machine was silent throughout, so the end
+    // reading (an older one) is its own baseline → 0. Not flagged partial — a zero
+    // already counts as "no LiDAT data" wherever totals are built.
+    return {
+      consumed: 0,
+      baselineCum: endRow.fuel_consumed_cum,
+      baselineTime: endRow.reading_time,
+      endTime: endRow.reading_time,
+      countInRange,
+      partial: false,
+    };
   }
 
-  if (!baseline) {
-    // Nothing recent before the range and nothing inside it: the machine was
-    // silent throughout, so the end reading (an old one) is its own baseline → 0.
-    baseline = endRow;
-    partial = false;
+  // Start is covered when the last reading before the range is recent, or the
+  // counter didn't move between it and the first reading inside (parked).
+  const startCovered =
+    !!prevRow &&
+    (prevRow.reading_time >= boundaryFloorIso(fromIso) ||
+      parkedBetween(prevRow.fuel_consumed_cum, firstRow.fuel_consumed_cum));
+  const baseline = startCovered ? prevRow! : firstRow;
+
+  // End is covered the same way: the last reading in the range is recent, or the
+  // next reading after the range shows the counter didn't move.
+  let endCovered = endRow.reading_time >= boundaryFloorIso(toIso);
+  if (!endCovered) {
+    const nextRow = fuelRow(serial, 'reading_time > ? ORDER BY reading_time ASC', toIso);
+    endCovered = !!nextRow && parkedBetween(endRow.fuel_consumed_cum, nextRow.fuel_consumed_cum);
   }
 
   const consumed = Math.max(0, endRow.fuel_consumed_cum - baseline.fuel_consumed_cum);
@@ -133,8 +132,20 @@ export function lidatConsumption(
     baselineTime: baseline.reading_time,
     endTime: endRow.reading_time,
     countInRange,
-    partial,
+    partial: !startCovered || !endCovered,
   };
+}
+
+type FuelRow = { reading_time: string; fuel_consumed_cum: number };
+
+/** First fuel reading for `serial` matching `where` (which carries its own ORDER BY). */
+function fuelRow(serial: string, where: string, ...params: string[]): FuelRow | undefined {
+  return db
+    .prepare(
+      `SELECT reading_time, fuel_consumed_cum FROM lidat_fuel_reading
+       WHERE serial_number = ? AND ${where} LIMIT 1`,
+    )
+    .get(serial, ...params) as FuelRow | undefined;
 }
 
 /**

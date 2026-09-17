@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
-import { effectiveDateFloor, fmt, isStale, shortModel, today } from '../util';
+import { effectiveDateFloor, fmt, fmtDateTime, isStale, shortModel, today } from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
@@ -122,15 +122,15 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
   // Totals recomputed from the visible (group-filtered) rows so the cards and
   // chart stay in sync with the selected groups.
   const totals = useMemo(() => {
-    // Every card counts only machines that have BOTH a Maris issuance and a real
-    // LiDAT reading, so a machine missing one side can't skew the comparison.
+    // Every card counts only matched machines (see isMatched), so a machine missing
+    // one side — or silent for part of the range — can't skew the comparison.
     let matchedMarisLitres = 0;
     let matchedLidatLitres = 0;
     let matchedMachines = 0;
     for (const m of rows) {
-      if (m.marisIssuedLitres > 0 && m.lidatConsumedLitres !== null && m.lidatConsumedLitres > 0) {
+      if (isMatched(m)) {
         matchedMarisLitres += m.marisIssuedLitres;
-        matchedLidatLitres += m.lidatConsumedLitres;
+        matchedLidatLitres += m.lidatConsumedLitres ?? 0;
         matchedMachines += 1;
       }
     }
@@ -163,7 +163,22 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
     setError(null);
     try {
       const fn = kind === 'pdf' ? exportComparisonPdf : exportComparisonExcel;
-      await fn(rows, data, from, to);
+      // Same machines as the cards: the matched ones make up the table and its
+      // UKUPNO row, the rest are listed below by reason (the Izvještaji layout).
+      const matched = rows.filter(isMatched);
+      const excluded = rows.filter((m) => !isMatched(m));
+      const report: ComparisonResult = {
+        ...data,
+        machines: matched,
+        totals: {
+          marisIssuedLitres: totals.matchedMarisLitres,
+          lidatConsumedLitres: totals.matchedLidatLitres,
+          differenceLitres: totals.matchedDifferenceLitres,
+          machinesWithLidatData: totals.matchedMachines,
+          machinesTotal: matched.length,
+        },
+      };
+      await fn(matched, report, from, to, undefined, excluded);
     } catch (e) {
       setError(`Izvoz nije uspio: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -299,7 +314,14 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
                 <td>
                   <strong>{shortModel(m.model)}</strong> <span className="muted">{m.serialNumber}</span>
                   {m.lidatPartial && (
-                    <span className="pill warn" title="Nema očitanja prije početka razdoblja — potrošnja je podcijenjena">
+                    <span
+                      className="pill warn"
+                      title={`LiDAT očitanja ne pokrivaju cijelo razdoblje${
+                        m.lidatBaselineTime && m.lidatEndTime
+                          ? ` (samo ${fmtDateTime(m.lidatBaselineTime)} – ${fmtDateTime(m.lidatEndTime)})`
+                          : ''
+                      } — stroj nije uključen u zbrojeve`}
+                    >
                       djelomično
                     </span>
                   )}
@@ -336,6 +358,17 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
         />
       )}
     </>
+  );
+}
+
+// A machine is compared (cards, export totals) only when Maris issued fuel for it
+// AND LiDAT measured consumption over the whole range — not "djelomično".
+function isMatched(m: MachineComparison): boolean {
+  return (
+    m.marisIssuedLitres > 0 &&
+    m.lidatConsumedLitres !== null &&
+    m.lidatConsumedLitres > 0 &&
+    !m.lidatPartial
   );
 }
 
