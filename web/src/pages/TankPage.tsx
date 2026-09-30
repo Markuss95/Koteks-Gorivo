@@ -8,7 +8,7 @@ import type {
   TankMachineSummary,
   TankOverview,
 } from '../types';
-import { effectiveDateFloor, fmt, fmtDate, fmtDateTime, shortModel, today } from '../util';
+import { daysAgo, effectiveDateFloor, fmt, fmtDate, fmtDateTime, shortModel, today } from '../util';
 import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
@@ -16,6 +16,8 @@ import { TankDetail } from '../components/TankDetail';
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
+// Until a start date is picked, fuel control opens on the last ten days.
+const DEFAULT_DAYS = 10;
 
 // Tank-level collection started on this day; nothing earlier to show.
 const EVENTS_FLOOR = '2026-09-16';
@@ -152,7 +154,7 @@ export function TankPage({
   allowedGroups: MachineGroup[];
   isAdmin: boolean;
 }) {
-  const { from, to, setFrom, setTo } = useDateRange();
+  const { from, to, setFrom, setTo } = useDateRange(daysAgo(DEFAULT_DAYS));
   const [minDate, setMinDate] = useState(MIN_DATE_FALLBACK);
   const [data, setData] = useState<TankOverview | null>(null);
   const [loading, setLoading] = useState(false);

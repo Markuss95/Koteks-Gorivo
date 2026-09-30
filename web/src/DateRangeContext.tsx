@@ -1,10 +1,13 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { MachineGroup } from './types';
-import { daysAgo, effectiveDateFloor, today } from './util';
+import { effectiveDateFloor, today } from './util';
 
 /**
  * The date range is shared by every reporting page, so switching tabs keeps the
  * period you were looking at instead of resetting to the default.
+ *
+ * Until the user picks a start date, each page opens on its own default (see
+ * `useDateRange`); once they pick one, that choice is what every page shows.
  *
  * Each page still applies its own group-aware floor on top (Velički Kamen and
  * Kamen Psunj start later), which may clamp `from` upward — that clamp is
@@ -18,12 +21,18 @@ interface DateRange {
   setTo: (v: string) => void;
 }
 
-const DateRangeContext = createContext<DateRange | null>(null);
+interface SharedRange {
+  floor: string;
+  chosenFrom: string | null;
+  setChosenFrom: (v: string) => void;
+  to: string;
+  setTo: (v: string) => void;
+}
+
+const DateRangeContext = createContext<SharedRange | null>(null);
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
-// The range a session opens on: the last ten days.
-const DEFAULT_DAYS = 10;
 
 export function DateRangeProvider({
   allowedGroups,
@@ -32,24 +41,37 @@ export function DateRangeProvider({
   allowedGroups: MachineGroup[];
   children: ReactNode;
 }) {
-  // Start on the last DEFAULT_DAYS, but never before the group-aware floor, so
-  // the very first fetch already uses a valid range for this user (a
-  // Velički/Psunj-only user must not start before their data begins).
-  const [from, setFrom] = useState(() => {
-    const floor = effectiveDateFloor(MIN_DATE_FALLBACK, [
+  // The group-aware floor, so the very first fetch already uses a valid range
+  // for this user (a Velički/Psunj-only user must not start in June).
+  const [floor] = useState(() =>
+    effectiveDateFloor(MIN_DATE_FALLBACK, [
       allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek',
-    ]);
-    const start = daysAgo(DEFAULT_DAYS);
-    return start > floor ? start : floor;
-  });
+    ]),
+  );
+  // The start date the user picked; null until they pick one.
+  const [chosenFrom, setChosenFrom] = useState<string | null>(null);
   const [to, setTo] = useState(today());
 
-  const value = useMemo(() => ({ from, to, setFrom, setTo }), [from, to]);
+  const value = useMemo(
+    () => ({ floor, chosenFrom, setChosenFrom, to, setTo }),
+    [floor, chosenFrom, to],
+  );
   return <DateRangeContext.Provider value={value}>{children}</DateRangeContext.Provider>;
 }
 
-export function useDateRange(): DateRange {
+/**
+ * The shared range as one page sees it. `defaultFrom` is where this page opens
+ * until the user picks a start date; without it, or before the floor, the page
+ * opens on the oldest available date.
+ */
+export function useDateRange(defaultFrom?: string): DateRange {
   const ctx = useContext(DateRangeContext);
   if (!ctx) throw new Error('useDateRange must be used inside a DateRangeProvider');
-  return ctx;
+  const pageDefault = defaultFrom && defaultFrom > ctx.floor ? defaultFrom : ctx.floor;
+  return {
+    from: ctx.chosenFrom ?? pageDefault,
+    to: ctx.to,
+    setFrom: ctx.setChosenFrom,
+    setTo: ctx.setTo,
+  };
 }
