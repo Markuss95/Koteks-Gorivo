@@ -51,6 +51,75 @@ export const SENSOR_LABELS: Record<SensorQuality, string> = {
   none: 'nema podataka',
 };
 
+type Sort<K> = { key: K; dir: 1 | -1 };
+
+/** Nulls last in either direction; text by locale, numbers numerically. */
+function compareBy<T, K>(valueOf: (row: T, key: K) => number | string | null, sort: Sort<K>) {
+  return (a: T, b: T) => {
+    const av = valueOf(a, sort.key);
+    const bv = valueOf(b, sort.key);
+    if (av === null) return bv === null ? 0 : 1;
+    if (bv === null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv as string) * sort.dir;
+    return ((av as number) - (bv as number)) * sort.dir;
+  };
+}
+
+/** The same column again reverses; a new column starts highest first. */
+function nextSort<K>(key: K) {
+  return (s: Sort<K> | null): Sort<K> =>
+    s && s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 };
+}
+
+type EventSortKey = 'date' | 'time' | 'machine' | 'kind' | 'litres';
+
+function eventValue(e: TankEvent, key: EventSortKey): number | string | null {
+  switch (key) {
+    case 'date':
+      return `${e.day} ${e.time ?? ''}`;
+    case 'time':
+      return e.time ? clock(e.time) : null; // time of day, e.g. night-time drains together
+    case 'machine':
+      return `${shortModel(e.model)} ${e.serialNumber}`;
+    case 'kind':
+      return EVENT_ORDER.indexOf(e.kind);
+    case 'litres':
+      return e.litres;
+  }
+}
+
+type MachineSortKey =
+  | 'model'
+  | 'sensor'
+  | 'refuelCount'
+  | 'slipOkShare'
+  | 'slipNoRefuel'
+  | 'refuelsWithoutSlip'
+  | 'drainLitres'
+  | 'cycleMissingLitres';
+
+// Sensor precision: precise beats coarse beats too-little-data beats none, and
+// within precise and coarse a smaller level step is the more precise sensor.
+const SENSOR_RANK: Record<SensorQuality, number> = { fine: 3, coarse: 2, unknown: 1, none: 0 };
+const NO_STEP = 999_999;
+
+function machineValue(m: TankMachineSummary, key: MachineSortKey): number | string | null {
+  switch (key) {
+    case 'model':
+      return `${shortModel(m.model)} ${m.serialNumber}`;
+    case 'sensor':
+      return SENSOR_RANK[m.sensor] * 1_000_000 - Math.min(m.sensorStepLitres ?? NO_STEP, NO_STEP);
+    case 'slipOkShare': {
+      const slips = m.slipCount - m.slipNoData;
+      return slips > 0 ? m.slipOk / slips : null;
+    }
+    case 'cycleMissingLitres':
+      return m.cycleCount ? m.cycleMissingLitres : null;
+    default:
+      return m[key];
+  }
+}
+
 /** Time of day in Croatia, e.g. '11:50'. */
 function clock(iso: string | null): string {
   if (!iso) return '—';
@@ -94,6 +163,9 @@ export function TankPage({
   );
   const [kinds, setKinds] = useState<Set<TankEventKind>>(() => new Set(EVENT_ORDER));
   const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
+  // Table sorts; null keeps each table's default order.
+  const [sort, setSort] = useState<Sort<MachineSortKey> | null>(null);
+  const [eventSort, setEventSort] = useState<Sort<EventSortKey> | null>(null);
 
   // Events list: its own window of EVENTS_PAGE_DAYS ending on `eventsEnd`,
   // paged by that many days and independent of the page's date range.
@@ -174,24 +246,40 @@ export function TankPage({
   const machines = useMemo<TankMachineSummary[]>(() => {
     if (!data) return [];
     const loss = (m: TankMachineSummary) => Math.max(m.drainLitres, m.cycleMissingLitres);
-    return data.machines
-      .filter((m) => groups.has(m.group))
-      .sort(
+    const rows = data.machines.filter((m) => groups.has(m.group));
+    if (!sort) {
+      // Until a column is chosen: the biggest losses first.
+      return rows.sort(
         (a, b) =>
           loss(b) - loss(a) ||
           b.slipMismatch + b.slipNoRefuel - (a.slipMismatch + a.slipNoRefuel) ||
           b.levelReadings - a.levelReadings,
       );
-  }, [data, groups]);
+    }
+    return rows.sort(compareBy(machineValue, sort));
+  }, [data, groups, sort]);
+
+  const th = (label: string, key: MachineSortKey, num = false) => (
+    <Th label={label} num={num} onClick={() => setSort(nextSort(key))} active={sort?.key === key} dir={sort?.dir ?? -1} />
+  );
+  const eventTh = (label: string, key: EventSortKey, num = false) => (
+    <Th
+      label={label}
+      num={num}
+      onClick={() => setEventSort(nextSort(key))}
+      active={eventSort?.key === key}
+      dir={eventSort?.dir ?? -1}
+    />
+  );
 
   const groupEvents = useMemo(
     () => (data ? data.events.filter((e) => groups.has(e.group)) : []),
     [data, groups],
   );
-  const events = useMemo(
-    () => (eventsData ?? []).filter((e) => groups.has(e.group) && kinds.has(e.kind)),
-    [eventsData, groups, kinds],
-  );
+  const events = useMemo(() => {
+    const rows = (eventsData ?? []).filter((e) => groups.has(e.group) && kinds.has(e.kind));
+    return eventSort ? rows.sort(compareBy(eventValue, eventSort)) : rows;
+  }, [eventsData, groups, kinds, eventSort]);
 
   const totals = useMemo(() => {
     const of = (k: TankEventKind) => groupEvents.filter((e) => e.kind === k);
@@ -376,11 +464,11 @@ export function TankPage({
           <table>
             <thead>
               <tr>
-                <th>Datum</th>
-                <th>Vrijeme</th>
-                <th>Stroj</th>
-                <th>Vrsta</th>
-                <th>Opis</th>
+                {eventTh('Datum', 'date')}
+                {eventTh('Vrijeme', 'time')}
+                {eventTh('Stroj', 'machine')}
+                {eventTh('Vrsta', 'kind')}
+                {eventTh('Opis', 'litres')}
               </tr>
             </thead>
             <tbody>
@@ -426,14 +514,14 @@ export function TankPage({
           <table>
             <thead>
               <tr>
-                <th>Stroj</th>
-                <th>Senzor razine</th>
-                <th className="num">Dolijevanja</th>
-                <th className="num">Izdatnice u redu</th>
-                <th className="num">Bez dolijevanja</th>
-                <th className="num">Dolij. bez izdatnice</th>
-                <th className="num">Odljevi (L)</th>
-                <th className="num">Manjak između punjenja</th>
+                {th('Stroj', 'model')}
+                {th('Senzor razine', 'sensor')}
+                {th('Dolijevanja', 'refuelCount', true)}
+                {th('Izdatnice u redu', 'slipOkShare', true)}
+                {th('Bez dolijevanja', 'slipNoRefuel', true)}
+                {th('Dolij. bez izdatnice', 'refuelsWithoutSlip', true)}
+                {th('Odljevi (L)', 'drainLitres', true)}
+                {th('Manjak između punjenja', 'cycleMissingLitres', true)}
               </tr>
             </thead>
             <tbody>
@@ -446,11 +534,6 @@ export function TankPage({
                 >
                   <td>
                     <strong>{shortModel(m.model)}</strong> <span className="muted">{m.serialNumber}</span>
-                    {m.capacityCorrected && (
-                      <span className="pill warn" title="Kapacitet spremnika ručno ispravljen">
-                        ispravljen spremnik
-                      </span>
-                    )}
                     {m.capacitySuspect && (
                       <span
                         className="pill warn"
@@ -506,5 +589,25 @@ export function TankPage({
         />
       )}
     </>
+  );
+}
+
+function Th({
+  label,
+  onClick,
+  active,
+  dir,
+  num,
+}: {
+  label: string;
+  onClick: () => void;
+  active: boolean;
+  dir: 1 | -1;
+  num?: boolean;
+}) {
+  return (
+    <th className={num ? 'num' : ''} onClick={onClick}>
+      {label} {active ? (dir === 1 ? '▲' : '▼') : ''}
+    </th>
   );
 }
