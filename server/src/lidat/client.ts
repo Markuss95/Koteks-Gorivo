@@ -78,19 +78,91 @@ function parsePercent(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-async function fetchXml(account: LidatAccount, pathSuffix: string): Promise<any> {
+// LiDAT answers a burst of requests with 503 "Service Unavailable" and keeps
+// refusing while the burst goes on. So the sync paces its requests, and a
+// refused request waits and tries again instead of failing straight away.
+// Both overridable (e.g. to test against a fake LiDAT without real waits).
+const MIN_GAP_MS = Number(process.env.LIDAT_MIN_GAP_MS ?? 500);
+const RETRY_DELAYS_MS = (process.env.LIDAT_RETRY_DELAYS_MS ?? '5000,20000,60000')
+  .split(',')
+  .map(Number)
+  .filter((n) => Number.isFinite(n) && n >= 0);
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const REQUEST_TIMEOUT_MS = 60_000;
+
+/** LiDAT kept refusing (or not answering) even after the retries. */
+export class LidatUnavailableError extends Error {}
+
+// After this many requests in a row that failed even with retries, LiDAT is
+// taken to be down: the rest of the run fails fast instead of spending ~1.5 min
+// per request, and the next run carries on from the cursors.
+const DOWN_AFTER_FAILURES = 3;
+let failuresInARow = 0;
+
+/** Start of a sync run: give LiDAT a clean slate. */
+export function resetLidatBreaker(): void {
+  failuresInARow = 0;
+}
+
+export function lidatLooksDown(): boolean {
+  return failuresInARow >= DOWN_AFTER_FAILURES;
+}
+
+let nextSlot = 0;
+/** Wait for this request's turn; slots are reserved up front, so parallel calls queue too. */
+async function paced(): Promise<void> {
+  const now = Date.now();
+  const at = Math.max(now, nextSlot);
+  nextSlot = at + MIN_GAP_MS;
+  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+}
+
+/**
+ * GET one LiDAT resource and parse it. `quick` (the health check) skips pacing
+ * and retries so the status dots answer at once.
+ */
+async function fetchXml(
+  account: LidatAccount,
+  pathSuffix: string,
+  { quick = false }: { quick?: boolean } = {},
+): Promise<any> {
   const url = `${account.baseUrl}${pathSuffix}`;
-  const res = await fetch(url, {
-    headers: { Authorization: basicAuthHeader(account), Accept: 'application/xml' },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(
-      `LiDAT request failed (${res.status}) for ${account.label} ${pathSuffix}: ${text.slice(0, 300)}`,
-    );
+  const delays = quick ? [] : RETRY_DELAYS_MS;
+  let lastProblem = '';
+  if (!quick && lidatLooksDown()) {
+    throw new LidatUnavailableError(`LiDAT unavailable — ${pathSuffix} skipped for the rest of this run`);
   }
-  const xml = await res.text();
-  return parser.parse(xml);
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, delays[attempt - 1]));
+    if (!quick) await paced();
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: basicAuthHeader(account), Accept: 'application/xml' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Network error or timeout: worth another try.
+      lastProblem = err instanceof Error ? err.message : String(err);
+      continue;
+    }
+    if (res.ok) {
+      if (!quick) failuresInARow = 0;
+      return parser.parse(await res.text());
+    }
+
+    const text = await res.text().catch(() => '');
+    const problem = `LiDAT request failed (${res.status}) for ${account.label} ${pathSuffix}: ${text.slice(0, 300)}`;
+    // A bad request, wrong login or unknown machine won't fix itself.
+    if (!RETRYABLE_STATUS.has(res.status)) throw new Error(problem);
+    lastProblem = problem;
+  }
+  if (!quick) failuresInARow++;
+  throw new LidatUnavailableError(
+    `${lastProblem} (gave up after ${delays.length + 1} attempts)`,
+  );
 }
 
 function parseEquipmentHeader(eq: any): Pick<
@@ -377,7 +449,7 @@ export async function lidatHealth(): Promise<{
   const accounts = await Promise.all(
     config.lidat.accounts.map(async (account): Promise<LidatAccountHealth> => {
       try {
-        const doc = await fetchXml(account, '/Aemp2/Fleet/1');
+        const doc = await fetchXml(account, '/Aemp2/Fleet/1', { quick: true });
         const fleet = doc?.Fleet ?? doc;
         const count = toArray(fleet?.Equipment).length;
         return { label: account.label, ok: true, message: `Fleet page 1 returned ${count} machine(s)` };

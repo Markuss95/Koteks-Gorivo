@@ -6,6 +6,8 @@ import {
   fetchCumulativeHours,
   fetchFuelRemaining,
   fetchLocationHistory,
+  lidatLooksDown,
+  resetLidatBreaker,
   type LidatLocationReading,
 } from '../lidat/client.js';
 
@@ -62,6 +64,7 @@ export async function runLidatSync(): Promise<{
     return { readingsAdded: 0, machinesOk: 0, machinesFailed: 0, message: 'Sync already running' };
   }
   syncing = true;
+  resetLidatBreaker();
 
   const updateIdentity = db.prepare(
     `UPDATE machine SET
@@ -314,7 +317,14 @@ export async function runLidatSync(): Promise<{
       saveState.run({ serial, series, until: endUtc, full: full ? endUtc : null });
 
     let fullCount = 0;
+    let notReached = 0;
     for (const m of machines) {
+      // LiDAT kept refusing even with retries: leave the rest for the next run,
+      // which starts from the same cursors.
+      if (lidatLooksDown()) {
+        notReached++;
+        continue;
+      }
       const machineRef = { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number };
       const fuelWindow = windowFor(m.serial_number, 'fuel');
       const hoursWindow = windowFor(m.serial_number, 'hours');
@@ -438,10 +448,13 @@ export async function runLidatSync(): Promise<{
       }
     }
 
-    const mode = `${fullCount} full, ${machines.length - fullCount} incremental`;
+    const mode = `${fullCount} full, ${machines.length - fullCount - notReached} incremental`;
+    const stopped = notReached
+      ? `Stopped early — LiDAT unavailable, ${notReached} machine(s) left for the next run. `
+      : '';
     const message =
       errors.length > 0
-        ? `Completed with ${errors.length} error(s) (${mode}): ${errors[0]}`
+        ? `${stopped}Completed with ${errors.length} error(s) (${mode}): ${errors[0]}`
         : `OK (${mode})`;
     db.prepare(
       `UPDATE sync_log SET finished_at = ?, status = 'success', readings_added = ?,
