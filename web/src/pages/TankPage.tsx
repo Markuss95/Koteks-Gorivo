@@ -17,6 +17,17 @@ import { TankDetail } from '../components/TankDetail';
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
 
+// Tank-level collection started on this day; nothing earlier to show.
+const EVENTS_FLOOR = '2026-09-16';
+// The events list shows this many days at a time, newest first.
+const EVENTS_PAGE_DAYS = 3;
+
+function shiftDay(day: string, days: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export const EVENT_LABELS: Record<TankEventKind, string> = {
   drain: 'Odljev iz spremnika',
   cycle_loss: 'Manjak između punjenja',
@@ -84,6 +95,46 @@ export function TankPage({
   const [kinds, setKinds] = useState<Set<TankEventKind>>(() => new Set(EVENT_ORDER));
   const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
 
+  // Events list: its own window of EVENTS_PAGE_DAYS ending on `eventsEnd`,
+  // paged by that many days and independent of the page's date range.
+  const [eventsEnd, setEventsEnd] = useState(() => today());
+  const eventsFrom = useMemo(() => {
+    const start = shiftDay(eventsEnd, -(EVENTS_PAGE_DAYS - 1));
+    return start < EVENTS_FLOOR ? EVENTS_FLOOR : start;
+  }, [eventsEnd]);
+  const [eventsData, setEventsData] = useState<TankEvent[] | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const eventsSeq = useRef(0);
+  const loadEvents = () => {
+    setEventsLoading(true);
+    setEventsError(null);
+    const seq = ++eventsSeq.current;
+    api
+      .tankOverview(eventsFrom, eventsEnd)
+      .then((d) => {
+        if (seq === eventsSeq.current) setEventsData(d.events);
+      })
+      .catch((e) => {
+        if (seq === eventsSeq.current) setEventsError(e.message);
+      })
+      .finally(() => {
+        if (seq === eventsSeq.current) setEventsLoading(false);
+      });
+  };
+  useEffect(() => {
+    loadEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventsFrom, eventsEnd]);
+  const pageEvents = (days: number) =>
+    setEventsEnd((end) => {
+      const next = shiftDay(end, days);
+      if (next > today()) return today();
+      // Never page past the floor: the oldest page still ends a full window in.
+      const oldestEnd = shiftDay(EVENTS_FLOOR, EVENTS_PAGE_DAYS - 1);
+      return next < oldestEnd ? oldestEnd : next;
+    });
+
   // Latest request wins; an older, slower response can't overwrite a newer one.
   const reqSeq = useRef(0);
   const run = () => {
@@ -137,7 +188,10 @@ export function TankPage({
     () => (data ? data.events.filter((e) => groups.has(e.group)) : []),
     [data, groups],
   );
-  const events = useMemo(() => groupEvents.filter((e) => kinds.has(e.kind)), [groupEvents, kinds]);
+  const events = useMemo(
+    () => (eventsData ?? []).filter((e) => groups.has(e.group) && kinds.has(e.kind)),
+    [eventsData, groups, kinds],
+  );
 
   const totals = useMemo(() => {
     const of = (k: TankEventKind) => groupEvents.filter((e) => e.kind === k);
@@ -249,17 +303,45 @@ export function TankPage({
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Sumnjivi događaji ({events.length})</h2>
-          <div className="group-filter" style={{ marginLeft: 'auto' }}>
-            {EVENT_ORDER.map((k) => (
-              <label key={k} className="group-filter__item">
-                <input type="checkbox" checked={kinds.has(k)} onChange={() => toggleKind(k)} />
-                <span>{EVENT_LABELS[k]}</span>
-              </label>
-            ))}
+          <h2>
+            Sumnjivi događaji ({events.length}){' '}
+            <span className="muted" style={{ fontWeight: 400 }}>
+              {fmtDate(eventsFrom)} – {fmtDate(eventsEnd)}
+            </span>
+          </h2>
+          <div className="panel-actions" style={{ alignItems: 'center' }}>
+            <button
+              className="btn secondary"
+              onClick={() => pageEvents(-EVENTS_PAGE_DAYS)}
+              disabled={eventsLoading || eventsFrom <= EVENTS_FLOOR}
+            >
+              ← Starije
+            </button>
+            <DateField
+              value={eventsEnd}
+              min={EVENTS_FLOOR}
+              max={today()}
+              onChange={(d) => setEventsEnd(d < EVENTS_FLOOR ? EVENTS_FLOOR : d)}
+            />
+            <button
+              className="btn secondary"
+              onClick={() => pageEvents(EVENTS_PAGE_DAYS)}
+              disabled={eventsLoading || eventsEnd >= today()}
+            >
+              Novije →
+            </button>
           </div>
         </div>
-        {loading ? (
+        <div className="group-filter" style={{ marginBottom: 12 }}>
+          {EVENT_ORDER.map((k) => (
+            <label key={k} className="group-filter__item">
+              <input type="checkbox" checked={kinds.has(k)} onChange={() => toggleKind(k)} />
+              <span>{EVENT_LABELS[k]}</span>
+            </label>
+          ))}
+        </div>
+        {eventsError && <div className="error-box">{eventsError}</div>}
+        {eventsLoading ? (
           <div className="spinner">Učitavanje…</div>
         ) : (
           <table>
