@@ -212,6 +212,7 @@ export interface TankMachineSummary {
   slipNoRefuel: number;
   slipNoData: number;
   refuelsWithoutSlip: number;
+  refuelsAwaitingSlip: number;
   drainCount: number;
   drainLitres: number;
   cycleCount: number;
@@ -233,7 +234,8 @@ export type TankEventKind =
   | 'cycle_loss'
   | 'slip_mismatch'
   | 'slip_no_refuel'
-  | 'refuel_no_slip';
+  | 'refuel_no_slip'
+  | 'refuel_awaiting_slip';
 
 export interface TankEvent {
   kind: TankEventKind;
@@ -258,6 +260,8 @@ export interface TankOverview {
   generatedAt: string;
   levelHistoryFrom: string | null;
   marisError: string | null;
+  // A refuel without an izdatnica is only a finding after this many days.
+  marisGraceDays: number;
   machines: TankMachineSummary[];
   events: TankEvent[];
 }
@@ -279,6 +283,7 @@ export interface TankDetail {
   cycles: TankCycle[];
   slips: TankSlipCheck[];
   refuelsWithoutSlip: TankRefuel[];
+  refuelsAwaitingSlip: TankRefuel[];
   capacityHint: CapacityHint | null;
   from: string;
   to: string;
@@ -286,6 +291,7 @@ export interface TankDetail {
   levelSeries: Array<{ t: string; litres: number }>;
   // Newest LiDAT reading of any kind for this machine, whatever the range.
   lastLidatTime: string | null;
+  marisGraceDays: number;
 }
 
 export interface HealthResponse {

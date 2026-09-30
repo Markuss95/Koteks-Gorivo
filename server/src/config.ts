@@ -97,6 +97,11 @@ export const config = {
   // before this are rejected — LiDAT only serves 14 days and we have nothing older.
   dataMinDate: optional('DATA_MIN_DATE', '2026-05-27'),
 
+  // Maris izdatnice are entered late - up to about three weeks - but dated the
+  // day of the fill. A refuel without one is only a finding after this many days;
+  // until then it is "waiting for Maris".
+  marisGraceDays: Number(optional('MARIS_GRACE_DAYS', '21')),
+
   // Allowed browser origin for CORS. Empty = allow all (fine for local/dev).
   // In production set to the Netlify site URL, e.g. https://koteks-gorivo.netlify.app
   corsOrigin: optional('CORS_ORIGIN', ''),

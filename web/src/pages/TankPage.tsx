@@ -36,6 +36,7 @@ export const EVENT_LABELS: Record<TankEventKind, string> = {
   slip_mismatch: 'Izdatnica ≠ dolijevanje',
   slip_no_refuel: 'Izdatnica bez dolijevanja',
   refuel_no_slip: 'Dolijevanje bez izdatnice',
+  refuel_awaiting_slip: 'Dolijevanje čeka Maris',
 };
 
 const EVENT_ORDER: TankEventKind[] = [
@@ -44,11 +45,12 @@ const EVENT_ORDER: TankEventKind[] = [
   'slip_mismatch',
   'slip_no_refuel',
   'refuel_no_slip',
+  'refuel_awaiting_slip',
 ];
 
 // Shown until the user changes the filter: every kind except refuels without a
-// slip, which can still be ticked on.
-const DEFAULT_KINDS = EVENT_ORDER.filter((k) => k !== 'refuel_no_slip');
+// slip or still waiting for one, which can be ticked on.
+const DEFAULT_KINDS = EVENT_ORDER.filter((k) => k !== 'refuel_no_slip' && k !== 'refuel_awaiting_slip');
 
 export const SENSOR_LABELS: Record<SensorQuality, string> = {
   fine: 'precizan',
@@ -132,7 +134,8 @@ function clock(iso: string | null): string {
   return new Date(iso).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' });
 }
 
-function eventDetail(e: TankEvent): string {
+/** graceDays: how long a refuel waits for its izdatnica, once known. */
+function eventDetail(e: TankEvent, graceDays: number | null): string {
   switch (e.kind) {
     case 'drain':
       return `${fmt(e.litres, 0)} L napustilo spremnik bez potrošnje motora`;
@@ -148,6 +151,10 @@ function eventDetail(e: TankEvent): string {
       return `Maris ${fmt(e.marisLitres, 0)} L (izdatnica ${e.dokBroj}) · senzor nije vidio dolijevanje`;
     case 'refuel_no_slip':
       return `Spremnik +${fmt(e.tankLitres, 0)} L · nema izdatnice u Marisu`;
+    case 'refuel_awaiting_slip': {
+      const until = graceDays != null ? ` (čeka se do ${fmtDate(shiftDay(e.day, graceDays))})` : '';
+      return `Spremnik +${fmt(e.tankLitres, 0)} L · izdatnica još nije u Marisu${until}`;
+    }
   }
 }
 
@@ -181,6 +188,7 @@ export function TankPage({
     return start < EVENTS_FLOOR ? EVENTS_FLOOR : start;
   });
   const [eventsData, setEventsData] = useState<TankEvent[] | null>(null);
+  const [graceDays, setGraceDays] = useState<number | null>(null);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const eventsSeq = useRef(0);
@@ -191,7 +199,9 @@ export function TankPage({
     api
       .tankOverview(eventsFrom, eventsEnd)
       .then((d) => {
-        if (seq === eventsSeq.current) setEventsData(d.events);
+        if (seq !== eventsSeq.current) return;
+        setEventsData(d.events);
+        setGraceDays(d.marisGraceDays);
       })
       .catch((e) => {
         if (seq === eventsSeq.current) setEventsError(e.message);
@@ -365,8 +375,11 @@ export function TankPage({
           motor potrošio. <strong>Manjak između punjenja</strong>: između dva punjenja do punog
           spremnika uliveno je više goriva nego što je motor potrošio (za senzore koji ne mogu
           pokazati pojedinačni odljev). <strong>Izdatnica bez dolijevanja</strong>: senzor taj dan nije
-          vidio da je gorivo uliveno. Maris ponekad kasni s unosom, pa se nedavna dolijevanja mogu
-          privremeno prikazati bez izdatnice.
+          vidio da je gorivo uliveno. <strong>Dolijevanje bez izdatnice</strong>: senzor je vidio
+          dolijevanje, a u Marisu ni nakon {data?.marisGraceDays ?? graceDays ?? 'nekoliko'} dana nema
+          izdatnice za taj dan. Maris kasni s unosom (i do tri tjedna), ali izdatnicu datira danom
+          punjenja, pa je mlađe dolijevanje bez izdatnice samo <strong>čeka Maris</strong>, a ne
+          nalaz.
           {data?.levelHistoryFrom && (
             <>
               {' '}
@@ -509,8 +522,10 @@ export function TankPage({
                   <td>
                     <strong>{shortModel(e.model)}</strong> <span className="muted">{e.serialNumber}</span>
                   </td>
-                  <td className={e.kind === 'refuel_no_slip' ? '' : 'neg'}>{EVENT_LABELS[e.kind]}</td>
-                  <td className="muted">{eventDetail(e)}</td>
+                  <td className={e.kind === 'refuel_awaiting_slip' ? 'muted' : e.kind === 'refuel_no_slip' ? '' : 'neg'}>
+                    {EVENT_LABELS[e.kind]}
+                  </td>
+                  <td className="muted">{eventDetail(e, graceDays)}</td>
                 </tr>
               ))}
               {events.length === 0 && (
@@ -579,7 +594,15 @@ export function TankPage({
                     {m.slipCount - m.slipNoData > 0 ? `${m.slipOk}/${m.slipCount - m.slipNoData}` : '—'}
                   </td>
                   <td className={`num ${m.slipNoRefuel ? 'neg' : ''}`}>{m.slipNoRefuel || '—'}</td>
-                  <td className="num">{m.refuelsWithoutSlip || '—'}</td>
+                  <td className="num" title={m.refuelsAwaitingSlip ? `${m.refuelsAwaitingSlip} još čeka izdatnicu u Marisu` : undefined}>
+                    {m.refuelsWithoutSlip || (m.refuelsAwaitingSlip ? '' : '—')}
+                    {m.refuelsAwaitingSlip > 0 && (
+                      <span className="muted">
+                        {m.refuelsWithoutSlip ? ' + ' : ''}
+                        {m.refuelsAwaitingSlip} čeka
+                      </span>
+                    )}
+                  </td>
                   <td className={`num ${m.drainCount ? 'neg' : ''}`}>
                     {m.drainCount ? `${m.drainCount} × · ${fmt(m.drainLitres, 0)}` : '—'}
                   </td>

@@ -9,6 +9,7 @@
 //
 // Only the level history the sync has stored is usable (LiDAT keeps ~14 days),
 // so periods before the first sync that collected it have nothing to check.
+import { config } from '../config.js';
 import { db, getJsonSetting, setJsonSetting } from '../db/index.js';
 import { marisFetchItems, toMarisDate } from '../maris/client.js';
 import { getFuelArticleCodes } from './comparison.js';
@@ -170,7 +171,8 @@ export interface TankMachineAnalysis {
   drains: TankDrain[]; // only for precise sensors with a working fuel counter
   cycles: TankCycle[];
   slips: TankSlipCheck[];
-  refuelsWithoutSlip: TankRefuel[];
+  refuelsWithoutSlip: TankRefuel[]; // no izdatnica even after the Maris grace period
+  refuelsAwaitingSlip: TankRefuel[]; // no izdatnica yet, still inside the grace period
   // Slips consistently a multiple of the tank rise: the capacity is likely wrong.
   capacityHint: CapacityHint | null;
 }
@@ -200,6 +202,7 @@ export interface TankMachineSummary {
   slipNoRefuel: number;
   slipNoData: number;
   refuelsWithoutSlip: number;
+  refuelsAwaitingSlip: number;
   drainCount: number;
   drainLitres: number;
   cycleCount: number;
@@ -213,7 +216,8 @@ export type TankEventKind =
   | 'cycle_loss'
   | 'slip_mismatch'
   | 'slip_no_refuel'
-  | 'refuel_no_slip';
+  | 'refuel_no_slip'
+  | 'refuel_awaiting_slip';
 
 export interface TankEvent {
   kind: TankEventKind;
@@ -239,6 +243,7 @@ export interface TankOverview {
   levelHistoryFrom: string | null; // earliest collected level reading, any machine
   // Set when Maris couldn't be reached: drains are still reported, slip checks aren't.
   marisError: string | null;
+  marisGraceDays: number;
   machines: TankMachineSummary[];
   events: TankEvent[];
 }
@@ -251,6 +256,7 @@ export interface TankDetail extends TankMachineAnalysis {
   // Newest LiDAT reading of any kind for this machine (fuel or tank level),
   // whatever the selected range: when LiDAT last reported it.
   lastLidatTime: string | null;
+  marisGraceDays: number;
 }
 
 interface LevelPoint {
@@ -767,6 +773,8 @@ function analyseMachine(
     capacity && quality === 'fine' ? detectDrains(levels, burn, capacity, stepLitres) : [];
   const levelDays = new Set(levels.map((p) => localDay(p.time)));
   const { checks, unmatched } = checkSlips(slips, refuels, levelDays, stepLitres);
+  // Refuels on or after this day may still get their izdatnica.
+  const graceFrom = shiftDay(localDay(new Date().toISOString()), -config.marisGraceDays);
 
   // A matched slip that agreed with the sensor gives the metered refill volume.
   const marisByRefuel = new Map<string, number>();
@@ -794,7 +802,14 @@ function analyseMachine(
     cycles: cycles.filter((c) => inRange(localDay(c.end))),
     slips: checks.filter((c) => inRange(c.date)),
     // Without Maris every refuel would look slip-less — say nothing instead.
-    refuelsWithoutSlip: marisOk ? unmatched.filter((r) => inRange(localDay(r.time))) : [],
+    // Maris is entered late but dated the day of the fill, so a recent refuel
+    // without one is waiting for Maris, not yet a finding.
+    refuelsWithoutSlip: marisOk
+      ? unmatched.filter((r) => inRange(localDay(r.time)) && localDay(r.time) < graceFrom)
+      : [],
+    refuelsAwaitingSlip: marisOk
+      ? unmatched.filter((r) => inRange(localDay(r.time)) && localDay(r.time) >= graceFrom)
+      : [],
     capacityHint: capacityHint(
       checks.filter((c) => inRange(c.date)),
       capacity,
@@ -824,6 +839,7 @@ function summarise(a: TankMachineAnalysis): TankMachineSummary {
     slipNoRefuel: count('no_refuel'),
     slipNoData: count('no_data'),
     refuelsWithoutSlip: a.refuelsWithoutSlip.length,
+    refuelsAwaitingSlip: a.refuelsAwaitingSlip.length,
     drainCount: a.drains.length,
     drainLitres: sum(a.drains, (d) => d.litres),
     cycleCount: a.cycles.length,
@@ -876,15 +892,13 @@ function eventsOf(a: TankMachineAnalysis): TankEvent[] {
       dokBroj: c.dokBroj,
     });
   }
-  for (const r of a.refuelsWithoutSlip) {
-    out.push({
-      ...base,
-      kind: 'refuel_no_slip',
-      day: localDay(r.time),
-      time: r.time,
-      litres: r.litres,
-      tankLitres: r.litres,
-    });
+  for (const [kind, refuels] of [
+    ['refuel_no_slip', a.refuelsWithoutSlip],
+    ['refuel_awaiting_slip', a.refuelsAwaitingSlip],
+  ] as const) {
+    for (const r of refuels) {
+      out.push({ ...base, kind, day: localDay(r.time), time: r.time, litres: r.litres, tankLitres: r.litres });
+    }
   }
   return out;
 }
@@ -927,6 +941,7 @@ export async function buildTankOverview(
     generatedAt: new Date().toISOString(),
     levelHistoryFrom: firstLevelSince(floor),
     marisError: maris.error,
+    marisGraceDays: config.marisGraceDays,
     machines: summaries,
     events,
   };
@@ -972,5 +987,13 @@ export async function buildTankDetail(
   const lastLidatTime =
     [m.lastReadingTime, lastLevel].filter((t): t is string => !!t).sort().at(-1) ?? null;
 
-  return { ...analysis, from, to, marisError: maris.error, levelSeries, lastLidatTime };
+  return {
+    ...analysis,
+    from,
+    to,
+    marisError: maris.error,
+    levelSeries,
+    lastLidatTime,
+    marisGraceDays: config.marisGraceDays,
+  };
 }

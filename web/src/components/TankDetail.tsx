@@ -486,8 +486,8 @@ export function TankDetail({
               <div className="panel">
                 <h2>Dolijevanja bez izdatnice</h2>
                 <div className="muted" style={{ marginBottom: 12 }}>
-                  Senzor je vidio dolijevanje, ali u Marisu nema izdatnice za taj dan (±1 dan). Maris
-                  ponekad kasni s unosom.
+                  Senzor je vidio dolijevanje, ali u Marisu ni nakon {data.marisGraceDays} dana nema
+                  izdatnice za taj dan (±1 dan).
                 </div>
                 <table>
                   <thead>
@@ -511,11 +511,53 @@ export function TankDetail({
                 </table>
               </div>
             )}
+
+            {data.refuelsAwaitingSlip.length > 0 && (
+              <div className="panel">
+                <h2>Dolijevanja koja čekaju Maris</h2>
+                <div className="muted" style={{ marginBottom: 12 }}>
+                  Senzor je vidio dolijevanje, a izdatnice još nema. Maris kasni s unosom (i do tri
+                  tjedna), ali izdatnicu datira danom punjenja, pa se ona pojavi naknadno i ovdje se
+                  sama upari. Ako je ne bude ni nakon {data.marisGraceDays} dana, dolijevanje postaje
+                  nalaz „Dolijevanje bez izdatnice”.
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vrijeme</th>
+                      <th className="num">Razina prije → poslije (L)</th>
+                      <th className="num">Uliveno (L)</th>
+                      <th>Čeka se do</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.refuelsAwaitingSlip.map((r) => (
+                      <tr key={r.time}>
+                        <td>{fmtDateTime(r.time)}</td>
+                        <td className="num">
+                          {fmt(r.levelBefore, 0)} → {fmt(r.levelAfter, 0)}
+                        </td>
+                        <td className="num">+{fmt(r.litres, 0)}</td>
+                        <td className="muted">{fmtDate(localDayPlus(r.time, data.marisGraceDays))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </>
         )}
       </div>
     </div>
   );
+}
+
+/** The local calendar day of `iso` moved by `days`, as 'YYYY-MM-DD'. */
+function localDayPlus(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /** Local midnights inside [from, to], thinned to at most ~8 labels. */
