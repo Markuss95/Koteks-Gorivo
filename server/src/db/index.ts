@@ -79,6 +79,19 @@ export function initSchema(): void {
       FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
     );
 
+    -- How far the sync has read each machine's LiDAT time series, so a run only
+    -- asks for what's new (see sync/lidatSync.ts). full_refresh_at is when the
+    -- whole ~14-day window was last re-read. series is 'fuel' | 'hours' |
+    -- 'level' | 'location'.
+    CREATE TABLE IF NOT EXISTS lidat_sync_state (
+      serial_number   TEXT NOT NULL,
+      series          TEXT NOT NULL,
+      fetched_until   TEXT NOT NULL,         -- ISO 8601 UTC end of the last successful window
+      full_refresh_at TEXT,                  -- ISO 8601 UTC of the last full-window read
+      PRIMARY KEY (serial_number, series),
+      FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
+    );
+
     -- One GPS position per machine per UTC day (ISO 15143-3 Locations), kept as
     -- the latest fix of that day. Backfilled by the sync; accumulates over time
     -- so any past day from the data floor onward can be mapped.

@@ -67,6 +67,10 @@ npm start           # serves the API; build & host web/ behind any static server
   been running long enough to have stored readings spanning that period.
 - `lidatPartial` flag on a row means there was no stored reading before the range start, so consumption
   is a lower bound for that machine/period.
+- The sync is incremental: per machine and series (fuel, hours, tank level, positions) it keeps a cursor in
+  `lidat_sync_state` and asks LiDAT only for what arrived since the previous run (with a 3 h overlap). Each
+  machine is also re-read over the full 13-day window about once a day, a quarter of the fleet per run, as a
+  safety net for data LiDAT delivers late. A failed read leaves its cursor, so the next run retries it.
 - Tank control ("Kontrola goriva") uses the LiDAT tank-level sensor, stored by the sync in
   `lidat_fuel_level`. Like the other LiDAT series it only exists from the first sync that collected it
   (plus that sync's ~14-day backfill). Individual drops are only checked on precise sensors; coarse ones

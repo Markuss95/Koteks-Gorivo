@@ -21,9 +21,36 @@ interface MachineRow {
   model: string | null;
 }
 
+// Each run asks LiDAT only for what arrived since the previous one: every machine
+// keeps a cursor per time series (lidat_sync_state). LiDAT's window selects by
+// when data reached LiDAT rather than when it was measured — a machine that was
+// offline shows up with old timestamps in a recent window — so the cursor also
+// catches late data. As a safety net each machine is still re-read over the full
+// window about once a day, a slice of the fleet per run so no run is heavy.
+type Series = 'fuel' | 'hours' | 'level' | 'location';
+const SERIES: Series[] = ['fuel', 'hours', 'level', 'location'];
+
+// LiDAT requires the start date to be strictly within the last 14 days, so the
+// full window is 13 days for a safe margin against the boundary.
+const WINDOW_DAYS = 13;
+// Re-read the tail of the previous window, for messages LiDAT files a little late.
+const OVERLAP_HOURS = 3;
+const FULL_REFRESH_HOURS = 24;
+// About a quarter of the fleet: with the 6-hourly schedule every machine gets its
+// full re-read roughly once a day.
+const MAX_FULL_REFRESHES_PER_RUN = 14;
+
+const HOUR_MS = 3_600_000;
+
+/** LiDAT wants second precision, no milliseconds. */
+function isoSeconds(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 /**
- * Pull the LiDAT fleet snapshot + the last 14 days of cumulative fuel for every
- * mapped machine, and upsert readings. Idempotent — safe to run repeatedly.
+ * Pull the LiDAT fleet snapshot plus, per mapped machine, its fuel, hours,
+ * tank-level and position time series since the last run (or the full window
+ * when due), and upsert readings. Idempotent — safe to run repeatedly.
  */
 export async function runLidatSync(): Promise<{
   readingsAdded: number;
@@ -213,33 +240,94 @@ export async function runLidatSync(): Promise<{
       upsertSnapshot();
     }
 
-    // 2) Per-machine 14-day backfill of the cumulative fuel time series.
-    const machines = db
-      .prepare(
-        `SELECT serial_number, oem_name, model FROM machine
-         WHERE model IS NOT NULL AND model <> '' AND oem_name IS NOT NULL`,
-      )
-      .all() as MachineRow[];
+    // 2) Per-machine time series since each series' cursor (or the full window).
+    // Which AEMP account serves each machine was discovered from the fleet
+    // snapshots above; a machine on no account (e.g. not yet onboarded to LiDAT)
+    // has no time series to fetch, so it's skipped.
+    const machines = (
+      db
+        .prepare(
+          `SELECT serial_number, oem_name, model FROM machine
+           WHERE model IS NOT NULL AND model <> '' AND oem_name IS NOT NULL`,
+        )
+        .all() as MachineRow[]
+    ).filter((m) => serialAccount.has(m.serial_number));
 
-    const end = new Date();
-    // LiDAT requires the start date to be strictly within the last 14 days,
-    // so we use a 13-day window for safe margin against the boundary.
-    const start = new Date(end.getTime() - 13 * 24 * 60 * 60 * 1000);
-    const startUtc = start.toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const endUtc = end.toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const endMs = Date.now();
+    const endUtc = isoSeconds(endMs);
+    const fullStartMs = endMs - WINDOW_DAYS * 24 * HOUR_MS;
 
+    const state = new Map(
+      (
+        db
+          .prepare('SELECT serial_number, series, fetched_until, full_refresh_at FROM lidat_sync_state')
+          .all() as Array<{
+          serial_number: string;
+          series: Series;
+          fetched_until: string;
+          full_refresh_at: string | null;
+        }>
+      ).map((r) => [`${r.serial_number}|${r.series}`, r]),
+    );
+    const saveState = db.prepare(
+      `INSERT INTO lidat_sync_state (serial_number, series, fetched_until, full_refresh_at)
+       VALUES (@serial, @series, @until, @full)
+       ON CONFLICT(serial_number, series) DO UPDATE SET
+         fetched_until = excluded.fetched_until,
+         full_refresh_at = COALESCE(excluded.full_refresh_at, lidat_sync_state.full_refresh_at)`,
+    );
+
+    // A series with no cursor yet (the first run after cursors were introduced)
+    // picks up where the last finished run left off. Anything that run missed for
+    // a machine is recovered by the full re-read the machine is queued for.
+    const lastRun =
+      (
+        db
+          .prepare(`SELECT started_at FROM sync_log WHERE status = 'success' ORDER BY id DESC LIMIT 1`)
+          .get() as { started_at: string } | undefined
+      )?.started_at ?? null;
+
+    // Oldest full re-read across a machine's series; '' = never.
+    const lastFull = (serial: string) =>
+      SERIES.map((s) => state.get(`${serial}|${s}`)?.full_refresh_at ?? '').sort()[0];
+    const fullRefresh = new Set(
+      machines
+        .filter((m) => {
+          const t = lastFull(m.serial_number);
+          return !t || endMs - Date.parse(t) >= FULL_REFRESH_HOURS * HOUR_MS;
+        })
+        .sort((a, b) => lastFull(a.serial_number).localeCompare(lastFull(b.serial_number)))
+        .slice(0, MAX_FULL_REFRESHES_PER_RUN)
+        .map((m) => m.serial_number),
+    );
+
+    const windowFor = (serial: string, series: Series): { startUtc: string; full: boolean } => {
+      const cursor = state.get(`${serial}|${series}`)?.fetched_until ?? lastRun;
+      const startMs =
+        fullRefresh.has(serial) || !cursor
+          ? fullStartMs
+          : Math.max(Date.parse(cursor) - OVERLAP_HOURS * HOUR_MS, fullStartMs);
+      return { startUtc: isoSeconds(startMs), full: startMs <= fullStartMs };
+    };
+    // Only a successful read moves a cursor; a failed one is retried next run.
+    const markRead = (serial: string, series: Series, full: boolean) =>
+      saveState.run({ serial, series, until: endUtc, full: full ? endUtc : null });
+
+    let fullCount = 0;
     for (const m of machines) {
-      // Which AEMP account serves this machine? Discovered from the fleet
-      // snapshots above; a machine on no account (e.g. not yet onboarded to
-      // LiDAT) has no time-series to fetch, so skip it.
-      const account = serialAccount.get(m.serial_number);
-      if (!account) continue;
+      const machineRef = { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number };
+      const fuelWindow = windowFor(m.serial_number, 'fuel');
+      const hoursWindow = windowFor(m.serial_number, 'hours');
+      const levelWindow = windowFor(m.serial_number, 'level');
+      const locationWindow = windowFor(m.serial_number, 'location');
+      if ([fuelWindow, hoursWindow, levelWindow, locationWindow].some((w) => w.full)) fullCount++;
+      const account = serialAccount.get(m.serial_number)!;
 
       try {
         const readings = await fetchCumulativeFuelUsed(
           account,
-          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
-          startUtc,
+          machineRef,
+          fuelWindow.startUtc,
           endUtc,
         );
         const tx = db.transaction(() => {
@@ -255,6 +343,7 @@ export async function runLidatSync(): Promise<{
           }
         });
         tx();
+        markRead(m.serial_number, 'fuel', fuelWindow.full);
         machinesOk++;
       } catch (err) {
         machinesFailed++;
@@ -266,14 +355,19 @@ export async function runLidatSync(): Promise<{
       // = CumulativeNonProductiveIdleHours (URL capital P, element lower p). The
       // utilization view diffs each counter over the selected range.
       try {
-        const machineRef = { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number };
         const [operating, idle] = await Promise.all([
-          fetchCumulativeHours(account, machineRef, 'CumulativeOperatingHours', startUtc, endUtc),
+          fetchCumulativeHours(
+            account,
+            machineRef,
+            'CumulativeOperatingHours',
+            hoursWindow.startUtc,
+            endUtc,
+          ),
           fetchCumulativeHours(
             account,
             machineRef,
             'CumulativeNonProductiveIdleHours',
-            startUtc,
+            hoursWindow.startUtc,
             endUtc,
             'CumulativeNonproductiveIdleHours',
           ),
@@ -301,6 +395,7 @@ export async function runLidatSync(): Promise<{
           }
         });
         tx();
+        markRead(m.serial_number, 'hours', hoursWindow.full);
       } catch (err) {
         errors.push(`${m.serial_number} (hours): ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -309,12 +404,7 @@ export async function runLidatSync(): Promise<{
       // this history to match refuels with Maris slips and to flag fuel that left
       // the tank without being burned; LiDAT keeps only ~14 days, so store it now.
       try {
-        const levels = await fetchFuelRemaining(
-          account,
-          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
-          startUtc,
-          endUtc,
-        );
+        const levels = await fetchFuelRemaining(account, machineRef, levelWindow.startUtc, endUtc);
         const tx = db.transaction(() => {
           for (const r of levels) {
             const res = upsertLevel.run({
@@ -327,6 +417,7 @@ export async function runLidatSync(): Promise<{
           }
         });
         tx();
+        markRead(m.serial_number, 'level', levelWindow.full);
       } catch (err) {
         errors.push(`${m.serial_number} (level): ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -336,18 +427,22 @@ export async function runLidatSync(): Promise<{
       try {
         const locs = await fetchLocationHistory(
           account,
-          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
-          startUtc,
+          machineRef,
+          locationWindow.startUtc,
           endUtc,
         );
         storeDailyLocations(m.serial_number, locs, fetchedAt);
+        markRead(m.serial_number, 'location', locationWindow.full);
       } catch (err) {
         errors.push(`${m.serial_number} (location): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
+    const mode = `${fullCount} full, ${machines.length - fullCount} incremental`;
     const message =
-      errors.length > 0 ? `Completed with ${errors.length} error(s): ${errors[0]}` : 'OK';
+      errors.length > 0
+        ? `Completed with ${errors.length} error(s) (${mode}): ${errors[0]}`
+        : `OK (${mode})`;
     db.prepare(
       `UPDATE sync_log SET finished_at = ?, status = 'success', readings_added = ?,
         machines_ok = ?, machines_failed = ?, message = ? WHERE id = ?`,
