@@ -64,6 +64,21 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_lidat_hours_serial_metric_time
       ON lidat_hours_reading (serial_number, metric, reading_time);
 
+    -- Tank fill level pulled from LiDAT (ISO 15143-3 FuelRemaining /
+    -- FuelRemainingRatio), as a percentage of the tank. The tank sensor is
+    -- independent of the engine's fuel counter, which is what lets the tank-control
+    -- view check Maris slips against real refuels and spot fuel leaving the tank
+    -- unburned. LiDAT serves ~14 days, so history accumulates from the first sync
+    -- that collected it.
+    CREATE TABLE IF NOT EXISTS lidat_fuel_level (
+      serial_number TEXT NOT NULL,
+      reading_time  TEXT NOT NULL,           -- ISO 8601 UTC
+      percent       REAL NOT NULL,           -- 0–100 of the tank capacity
+      fetched_at    TEXT NOT NULL,
+      PRIMARY KEY (serial_number, reading_time),
+      FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
+    );
+
     -- One GPS position per machine per UTC day (ISO 15143-3 Locations), kept as
     -- the latest fix of that day. Backfilled by the sync; accumulates over time
     -- so any past day from the data floor onward can be mapped.

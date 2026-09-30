@@ -8,10 +8,19 @@ import { UsersPage } from './pages/UsersPage';
 import { LoginPage } from './pages/LoginPage';
 import { UtilizationPage } from './pages/UtilizationPage';
 import { StaleMachinesPage } from './pages/StaleMachinesPage';
+import { TankPage } from './pages/TankPage';
 import { DateRangeProvider } from './DateRangeContext';
 import { ReportsPage } from './pages/ReportsPage';
 
-type Tab = 'comparison' | 'utilization' | 'machines' | 'stale' | 'reports' | 'settings' | 'users';
+type Tab =
+  | 'comparison'
+  | 'tank'
+  | 'utilization'
+  | 'machines'
+  | 'stale'
+  | 'reports'
+  | 'settings'
+  | 'users';
 
 export function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -79,6 +88,9 @@ export function App() {
           <button className={activeTab === 'comparison' ? 'active' : ''} onClick={() => setTab('comparison')}>
             Lidat vs Maris
           </button>
+          <button className={activeTab === 'tank' ? 'active' : ''} onClick={() => setTab('tank')}>
+            Kontrola goriva
+          </button>
           <button className={activeTab === 'utilization' ? 'active' : ''} onClick={() => setTab('utilization')}>
             Iskorištenost
           </button>
@@ -128,6 +140,7 @@ export function App() {
         {/* One date range shared by every reporting page. */}
         <DateRangeProvider allowedGroups={user.allowedGroups}>
         {activeTab === 'comparison' && <ComparisonPage allowedGroups={user.allowedGroups} />}
+        {activeTab === 'tank' && <TankPage allowedGroups={user.allowedGroups} isAdmin={isAdmin} />}
         {activeTab === 'utilization' && <UtilizationPage allowedGroups={user.allowedGroups} />}
         {activeTab === 'machines' && (
           <MachinesPage

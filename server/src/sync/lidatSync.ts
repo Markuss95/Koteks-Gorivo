@@ -4,6 +4,7 @@ import {
   fetchFleetSnapshot,
   fetchCumulativeFuelUsed,
   fetchCumulativeHours,
+  fetchFuelRemaining,
   fetchLocationHistory,
   type LidatLocationReading,
 } from '../lidat/client.js';
@@ -65,6 +66,14 @@ export async function runLidatSync(): Promise<{
      VALUES (@serial, @metric, @time, @cum, @fetchedAt)
      ON CONFLICT(serial_number, metric, reading_time) DO UPDATE SET
        hours_cum = excluded.hours_cum,
+       fetched_at = excluded.fetched_at`,
+  );
+
+  const upsertLevel = db.prepare(
+    `INSERT INTO lidat_fuel_level (serial_number, reading_time, percent, fetched_at)
+     VALUES (@serial, @time, @percent, @fetchedAt)
+     ON CONFLICT(serial_number, reading_time) DO UPDATE SET
+       percent = excluded.percent,
        fetched_at = excluded.fetched_at`,
   );
 
@@ -177,6 +186,16 @@ export async function runLidatSync(): Promise<{
             fetchedAt,
           });
         }
+        // Current tank level — an extra point on top of the FuelRemainingRatio
+        // backfill below.
+        if (eq.fuelRemainingPercent !== undefined && eq.fuelRemainingTime) {
+          upsertLevel.run({
+            serial: eq.serialNumber,
+            time: eq.fuelRemainingTime,
+            percent: eq.fuelRemainingPercent,
+            fetchedAt,
+          });
+        }
         // Current snapshot position → today's location row (so the map works
         // even before the per-machine history backfill below has run).
         if (eq.latitude !== undefined && eq.longitude !== undefined && eq.locationTime) {
@@ -284,6 +303,32 @@ export async function runLidatSync(): Promise<{
         tx();
       } catch (err) {
         errors.push(`${m.serial_number} (hours): ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Tank fill level (best-effort, own try/catch). The tank-control view needs
+      // this history to match refuels with Maris slips and to flag fuel that left
+      // the tank without being burned; LiDAT keeps only ~14 days, so store it now.
+      try {
+        const levels = await fetchFuelRemaining(
+          account,
+          { oemName: m.oem_name!, model: m.model!, serialNumber: m.serial_number },
+          startUtc,
+          endUtc,
+        );
+        const tx = db.transaction(() => {
+          for (const r of levels) {
+            const res = upsertLevel.run({
+              serial: m.serial_number,
+              time: r.dateTime,
+              percent: r.percent,
+              fetchedAt,
+            });
+            readingsAdded += res.changes;
+          }
+        });
+        tx();
+      } catch (err) {
+        errors.push(`${m.serial_number} (level): ${err instanceof Error ? err.message : String(err)}`);
       }
 
       // Location history is best-effort: a Locations failure must not fail the

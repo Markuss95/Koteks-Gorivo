@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { listMachines, listMachinePositions, machineGroupsMap } from './services/machines.js';
 import { buildComparison, getFuelArticleCodes, lidatConsumption } from './services/comparison.js';
 import { buildUtilization, buildMachineSeries } from './services/utilization.js';
+import { buildTankOverview, buildTankDetail, setTankCapacityOverride } from './services/tank.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
 import { lidatHealth } from './lidat/client.js';
@@ -266,6 +267,63 @@ api.get('/utilization/:serial/series', (req, res) => {
     return;
   }
   res.json(buildMachineSeries(req.params.serial, parse.data.from, parse.data.to));
+});
+
+// ---- Tank control (tank level vs Maris slips and engine consumption) ----
+api.get('/tank', async (req, res) => {
+  const parse = rangeSchema.safeParse(req.query);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  try {
+    res.json(
+      await buildTankOverview(parse.data.from, parse.data.to, reqGroups(req as AuthedRequest)),
+    );
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+api.get('/tank/:serial', async (req, res) => {
+  const parse = rangeSchema.safeParse(req.query);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  if (!canAccessSerial(req as AuthedRequest, req.params.serial)) {
+    res.status(404).json({ error: 'Machine not found' });
+    return;
+  }
+  try {
+    const detail = await buildTankDetail(req.params.serial, parse.data.from, parse.data.to);
+    if (!detail) {
+      res.status(404).json({ error: 'Machine not found' });
+      return;
+    }
+    res.json(detail);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Correct a tank size LiDAT reports wrongly (null clears the correction). Every
+// litre the tank checks read off the sensor scales with it, so admin only.
+const capacitySchema = z.object({ litres: z.number().positive().max(5000).nullable() });
+
+api.put('/tank/:serial/capacity', adminOnly, (req, res) => {
+  const parse = capacitySchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  const exists = db.prepare('SELECT 1 FROM machine WHERE serial_number = ?').get(req.params.serial);
+  if (!exists) {
+    res.status(404).json({ error: 'Machine not found' });
+    return;
+  }
+  setTankCapacityOverride(req.params.serial, parse.data.litres);
+  res.json({ ok: true });
 });
 
 // ---- Sync ----

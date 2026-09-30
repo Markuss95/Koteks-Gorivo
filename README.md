@@ -47,6 +47,9 @@ All secrets live in `server/.env` (git-ignored). See `server/.env.example` for t
 | GET | `/api/machines` | Machines + mapping + LiDAT reading counts |
 | GET | `/api/machines/:serial/series?from&to` | LiDAT cumulative series + Maris issuances |
 | GET | `/api/comparison?from&to` | Per-machine + fleet comparison for a date range |
+| GET | `/api/tank?from&to` | Tank control: Maris slips vs. tank-sensor refuels, drops the engine didn't burn, fill-to-fill balance |
+| GET | `/api/tank/:serial?from&to` | Tank control for one machine, with its tank-level series |
+| PUT | `/api/tank/:serial/capacity` | Admin: correct a tank size LiDAT reports wrongly (`{ litres }`, `null` clears) |
 | POST | `/api/sync` | Trigger a LiDAT sync now |
 | GET | `/api/sync/status` | Recent sync logs |
 | GET/PUT | `/api/settings` | Fuel article codes |
@@ -64,3 +67,7 @@ npm start           # serves the API; build & host web/ behind any static server
   been running long enough to have stored readings spanning that period.
 - `lidatPartial` flag on a row means there was no stored reading before the range start, so consumption
   is a lower bound for that machine/period.
+- Tank control ("Kontrola goriva") uses the LiDAT tank-level sensor, stored by the sync in
+  `lidat_fuel_level`. Like the other LiDAT series it only exists from the first sync that collected it
+  (plus that sync's ~14-day backfill). Individual drops are only checked on precise sensors; coarse ones
+  (big quantised steps) are checked fill-to-fill instead.

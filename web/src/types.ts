@@ -139,6 +139,143 @@ export interface UtilizationSeries {
   points: UtilizationSeriesPoint[];
 }
 
+// ---- Tank control (tank-level sensor vs Maris slips and engine consumption) ----
+
+/**
+ * 'coarse' sensors move in big steps: refuels and fill-to-fill balance only, no
+ * drain detection. 'unknown' = too little movement to judge, treated like coarse.
+ */
+export type SensorQuality = 'fine' | 'coarse' | 'unknown' | 'none';
+
+/** From one fill to a full tank to the next. */
+export interface TankCycle {
+  start: string;
+  end: string;
+  refilledLitres: number;
+  refillSource: 'maris' | 'sensor';
+  burnedLitres: number;
+  missingLitres: number;
+  drainLitres: number;
+}
+
+export interface TankRefuel {
+  time: string;
+  prevTime: string;
+  litres: number;
+  levelBefore: number;
+  levelAfter: number;
+}
+
+export interface TankDrain {
+  time: string;
+  prevTime: string;
+  litres: number;
+  burnedLitres: number;
+  levelBefore: number;
+  levelAfter: number;
+  // The machine's stored GPS fix for that day, if any.
+  latitude: number | null;
+  longitude: number | null;
+  locationTime: string | null;
+}
+
+export type SlipStatus = 'ok' | 'mismatch' | 'no_refuel' | 'no_data';
+
+export interface TankSlipCheck {
+  date: string;
+  dokBroj: number;
+  sklSifra: string;
+  sklNaziv: string;
+  rnalog: string;
+  marisLitres: number;
+  tankLitres: number | null;
+  refuelTime: string | null;
+  differenceLitres: number | null;
+  status: SlipStatus;
+}
+
+export interface TankMachineSummary {
+  serialNumber: string;
+  model: string;
+  equipmentId: string | null;
+  group: MachineGroup;
+  tankCapacity: number | null;
+  capacityCorrected: boolean;
+  sensor: SensorQuality;
+  sensorStepLitres: number | null;
+  levelReadings: number;
+  refuelCount: number;
+  refuelLitres: number;
+  slipCount: number;
+  slipOk: number;
+  slipMismatch: number;
+  slipNoRefuel: number;
+  slipNoData: number;
+  refuelsWithoutSlip: number;
+  drainCount: number;
+  drainLitres: number;
+  cycleCount: number;
+  cycleRefilledLitres: number;
+  cycleMissingLitres: number;
+}
+
+export type TankEventKind =
+  | 'drain'
+  | 'cycle_loss'
+  | 'slip_mismatch'
+  | 'slip_no_refuel'
+  | 'refuel_no_slip';
+
+export interface TankEvent {
+  kind: TankEventKind;
+  serialNumber: string;
+  model: string;
+  group: MachineGroup;
+  day: string;
+  time: string | null;
+  // drain: unburned litres; cycle_loss: missing beyond flagged drains;
+  // slip events: Maris litres; refuel_no_slip: tank litres
+  litres: number;
+  tankLitres: number | null;
+  marisLitres: number | null;
+  burnedLitres: number | null;
+  since: string | null;
+  dokBroj: number | null;
+}
+
+export interface TankOverview {
+  from: string;
+  to: string;
+  generatedAt: string;
+  levelHistoryFrom: string | null;
+  marisError: string | null;
+  machines: TankMachineSummary[];
+  events: TankEvent[];
+}
+
+export interface TankDetail {
+  serialNumber: string;
+  model: string;
+  equipmentId: string | null;
+  group: MachineGroup;
+  tankCapacity: number | null;
+  lidatTankCapacity: number | null;
+  capacityCorrected: boolean;
+  sensor: SensorQuality;
+  sensorStepLitres: number | null;
+  levelReadings: number;
+  firstLevelTime: string | null;
+  refuels: TankRefuel[];
+  drains: TankDrain[];
+  cycles: TankCycle[];
+  slips: TankSlipCheck[];
+  refuelsWithoutSlip: TankRefuel[];
+  from: string;
+  to: string;
+  marisError: string | null;
+  levelSeries: Array<{ t: string; litres: number }>;
+}
+
 export interface HealthResponse {
   maris: { ok: boolean; message: string };
   lidat: { ok: boolean; message: string };

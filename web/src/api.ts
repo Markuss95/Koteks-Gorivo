@@ -16,6 +16,8 @@ import type {
   ManagedUser,
   Role,
   Settings,
+  TankDetail,
+  TankOverview,
   UtilizationResult,
   UtilizationSeries,
 } from './types';
@@ -119,6 +121,13 @@ export const api = {
     ),
   machineSeries: (serial: string, from: string, to: string) =>
     get<MachineSeries>(`/api/machines/${encodeURIComponent(serial)}/series?from=${from}&to=${to}`),
+  tankOverview: (from: string, to: string) =>
+    get<TankOverview>(`/api/tank?from=${from}&to=${to}`),
+  tankDetail: (serial: string, from: string, to: string) =>
+    get<TankDetail>(`/api/tank/${encodeURIComponent(serial)}?from=${from}&to=${to}`),
+  // Admin: correct a tank size LiDAT reports wrongly (null clears it).
+  setTankCapacity: (serial: string, litres: number | null) =>
+    send<{ ok: boolean }>(`/api/tank/${encodeURIComponent(serial)}/capacity`, 'PUT', { litres }),
   settings: () => get<Settings>('/api/settings'),
   updateSettings: (fuelArticleCodes: string[]) =>
     send<Settings>('/api/settings', 'PUT', { fuelArticleCodes }),

@@ -20,6 +20,9 @@ export interface LidatEquipment {
   operatingHours?: number;
   idleHours?: number;
   hoursTime?: string;
+  // Tank fill level (ISO 15143-3 FuelRemaining), percent of capacity
+  fuelRemainingPercent?: number;
+  fuelRemainingTime?: string;
 }
 
 export interface LidatFuelReading {
@@ -38,6 +41,11 @@ export interface LidatLocationReading {
 export interface LidatHourReading {
   dateTime: string;
   hours: number;
+}
+
+export interface LidatLevelReading {
+  dateTime: string;
+  percent: number;
 }
 
 const parser = new XMLParser({
@@ -61,6 +69,13 @@ function encodeSegment(s: string): string {
 function toArray<T>(v: T | T[] | undefined | null): T[] {
   if (v === undefined || v === null) return [];
   return Array.isArray(v) ? v : [v];
+}
+
+/** Tank percentage, or undefined for an empty/non-numeric <Percent> (never a fake 0 %). */
+function parsePercent(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 async function fetchXml(account: LidatAccount, pathSuffix: string): Promise<any> {
@@ -165,6 +180,8 @@ export async function fetchFleetSnapshot(account: LidatAccount): Promise<LidatEq
         operatingHours: operating?.Hour !== undefined ? Number(operating.Hour) : undefined,
         idleHours: idle?.Hour !== undefined ? Number(idle.Hour) : undefined,
         hoursTime: operating?.['@_datetime'] ? String(operating['@_datetime']) : undefined,
+        fuelRemainingPercent: parsePercent(fuelRemaining?.Percent),
+        fuelRemainingTime: fuelRemaining?.['@_datetime'] ? String(fuelRemaining['@_datetime']) : undefined,
         ...parseLocation(eq),
       });
     }
@@ -298,6 +315,45 @@ export async function fetchCumulativeHours(
       const hour = n?.Hour;
       if (dt === undefined || hour === undefined) continue;
       out.push({ dateTime: String(dt), hours: Number(hour) });
+    }
+    if (nodes.length < 100) break;
+    page++;
+  }
+
+  return out;
+}
+
+/**
+ * Tank fill-level time series for one machine over [start, end] (ISO 15143-3
+ * FuelRemainingRatio). Root is <FuelRemainingMessages> with <FuelRemaining>
+ * children, each carrying a `datetime` attribute and a <Percent> value. Same
+ * 14-day window limit as the other time series.
+ */
+export async function fetchFuelRemaining(
+  account: LidatAccount,
+  machine: { oemName: string; model: string; serialNumber: string },
+  startUtc: string,
+  endUtc: string,
+): Promise<LidatLevelReading[]> {
+  const out: LidatLevelReading[] = [];
+  let page = 1;
+  const maxPages = 100;
+  const make = encodeSegment(machine.oemName || 'Liebherr');
+  const model = encodeSegment(machine.model);
+  const serial = encodeSegment(machine.serialNumber);
+
+  while (page <= maxPages) {
+    const suffix = `/Aemp2/Fleet/Equipment/${make}/${model}/${serial}/FuelRemainingRatio/${startUtc}/${endUtc}/${page}`;
+    const doc = await fetchXml(account, suffix);
+    const root = doc?.FuelRemainingMessages ?? doc?.Fleet ?? doc;
+    const nodes = toArray(root?.FuelRemaining);
+
+    if (nodes.length === 0) break;
+    for (const n of nodes) {
+      const dt = n?.['@_datetime'];
+      const percent = parsePercent(n?.Percent);
+      if (dt === undefined || percent === undefined) continue;
+      out.push({ dateTime: String(dt), percent });
     }
     if (nodes.length < 100) break;
     page++;
