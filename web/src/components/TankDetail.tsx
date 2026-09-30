@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { SensorQuality, SlipStatus, TankDetail as TankDetailData, TankDrain } from '../types';
-import { fmt, fmtDate, fmtDateTime, shortModel, today } from '../util';
+import { fmt, fmtDate, fmtDateTime, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
 
@@ -166,6 +166,16 @@ export function TankDetail({
                 Maris trenutno nije dostupan, pa izdatnice nisu provjerene. ({data.marisError})
               </div>
             )}
+
+            <div style={{ marginBottom: 8 }}>
+              <span className="muted">Zadnje LiDAT očitanje:</span>{' '}
+              <strong className={isStale(data.lastLidatTime) ? 'neg' : ''}>
+                {data.lastLidatTime ? fmtDateTime(data.lastLidatTime) : 'nikad'}
+              </strong>
+              {isStale(data.lastLidatTime) && (
+                <span className="muted"> — stroj se nije javio dulje od 10 dana</span>
+              )}
+            </div>
 
             <CapacityLine
               data={data}

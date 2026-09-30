@@ -284,6 +284,8 @@ export interface TankDetail {
   to: string;
   marisError: string | null;
   levelSeries: Array<{ t: string; litres: number }>;
+  // Newest LiDAT reading of any kind for this machine, whatever the range.
+  lastLidatTime: string | null;
 }
 
 export interface HealthResponse {

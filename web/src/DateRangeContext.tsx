@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { MachineGroup } from './types';
-import { effectiveDateFloor, today } from './util';
+import { daysAgo, effectiveDateFloor, today } from './util';
 
 /**
  * The date range is shared by every reporting page, so switching tabs keeps the
@@ -22,6 +22,8 @@ const DateRangeContext = createContext<DateRange | null>(null);
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
+// The range a session opens on: the last ten days.
+const DEFAULT_DAYS = 10;
 
 export function DateRangeProvider({
   allowedGroups,
@@ -30,13 +32,16 @@ export function DateRangeProvider({
   allowedGroups: MachineGroup[];
   children: ReactNode;
 }) {
-  // Start at the group-aware floor so the very first fetch already uses a valid
-  // range for this user (a Velički/Psunj-only user must not start in June).
-  const [from, setFrom] = useState(() =>
-    effectiveDateFloor(MIN_DATE_FALLBACK, [
+  // Start on the last DEFAULT_DAYS, but never before the group-aware floor, so
+  // the very first fetch already uses a valid range for this user (a
+  // Velički/Psunj-only user must not start before their data begins).
+  const [from, setFrom] = useState(() => {
+    const floor = effectiveDateFloor(MIN_DATE_FALLBACK, [
       allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek',
-    ]),
-  );
+    ]);
+    const start = daysAgo(DEFAULT_DAYS);
+    return start > floor ? start : floor;
+  });
   const [to, setTo] = useState(today());
 
   const value = useMemo(() => ({ from, to, setFrom, setTo }), [from, to]);

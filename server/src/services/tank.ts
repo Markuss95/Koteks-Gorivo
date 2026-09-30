@@ -248,6 +248,9 @@ export interface TankDetail extends TankMachineAnalysis {
   to: string;
   marisError: string | null;
   levelSeries: Array<{ t: string; litres: number }>;
+  // Newest LiDAT reading of any kind for this machine (fuel or tank level),
+  // whatever the selected range: when LiDAT last reported it.
+  lastLidatTime: string | null;
 }
 
 interface LevelPoint {
@@ -960,5 +963,14 @@ export async function buildTankDetail(
     .filter((p, i) => i % stride === 0 || i === levels.length - 1 || keep.has(p.time))
     .map((p) => ({ t: p.time, litres: round1(p.litres) }));
 
-  return { ...analysis, from, to, marisError: maris.error, levelSeries };
+  // Both tables store ISO 8601 UTC, so the later string is the later time.
+  const lastLevel = (
+    db.prepare('SELECT MAX(reading_time) t FROM lidat_fuel_level WHERE serial_number = ?').get(serial) as {
+      t: string | null;
+    }
+  ).t;
+  const lastLidatTime =
+    [m.lastReadingTime, lastLevel].filter((t): t is string => !!t).sort().at(-1) ?? null;
+
+  return { ...analysis, from, to, marisError: maris.error, levelSeries, lastLidatTime };
 }
