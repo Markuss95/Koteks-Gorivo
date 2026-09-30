@@ -167,13 +167,13 @@ export function TankPage({
   const [sort, setSort] = useState<Sort<MachineSortKey> | null>(null);
   const [eventSort, setEventSort] = useState<Sort<EventSortKey> | null>(null);
 
-  // Events list: its own window of EVENTS_PAGE_DAYS ending on `eventsEnd`,
-  // paged by that many days and independent of the page's date range.
+  // Events list: its own from/to window (default the last EVENTS_PAGE_DAYS),
+  // independent of the page's date range and paged by its own length.
   const [eventsEnd, setEventsEnd] = useState(() => today());
-  const eventsFrom = useMemo(() => {
-    const start = shiftDay(eventsEnd, -(EVENTS_PAGE_DAYS - 1));
+  const [eventsFrom, setEventsFrom] = useState(() => {
+    const start = shiftDay(today(), -(EVENTS_PAGE_DAYS - 1));
     return start < EVENTS_FLOOR ? EVENTS_FLOOR : start;
-  }, [eventsEnd]);
+  });
   const [eventsData, setEventsData] = useState<TankEvent[] | null>(null);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -198,14 +198,25 @@ export function TankPage({
     loadEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventsFrom, eventsEnd]);
-  const pageEvents = (days: number) =>
-    setEventsEnd((end) => {
-      const next = shiftDay(end, days);
-      if (next > today()) return today();
-      // Never page past the floor: the oldest page still ends a full window in.
-      const oldestEnd = shiftDay(EVENTS_FLOOR, EVENTS_PAGE_DAYS - 1);
-      return next < oldestEnd ? oldestEnd : next;
-    });
+  // Move the whole window by its own length (-1 older, +1 newer), keeping its
+  // length but never crossing the collection floor or today.
+  const pageEvents = (direction: -1 | 1) => {
+    const len =
+      Math.round((Date.parse(`${eventsEnd}T00:00:00Z`) - Date.parse(`${eventsFrom}T00:00:00Z`)) / 86_400_000) + 1;
+    let from = shiftDay(eventsFrom, direction * len);
+    let to = shiftDay(eventsEnd, direction * len);
+    if (from < EVENTS_FLOOR) {
+      from = EVENTS_FLOOR;
+      to = shiftDay(EVENTS_FLOOR, len - 1);
+    }
+    if (to > today()) {
+      to = today();
+      from = shiftDay(to, -(len - 1));
+      if (from < EVENTS_FLOOR) from = EVENTS_FLOOR;
+    }
+    setEventsFrom(from);
+    setEventsEnd(to);
+  };
 
   // Latest request wins; an older, slower response can't overwrite a newer one.
   const reqSeq = useRef(0);
@@ -429,20 +440,28 @@ export function TankPage({
           <div className="panel-actions" style={{ alignItems: 'center' }}>
             <button
               className="btn secondary"
-              onClick={() => pageEvents(-EVENTS_PAGE_DAYS)}
+              onClick={() => pageEvents(-1)}
               disabled={eventsLoading || eventsFrom <= EVENTS_FLOOR}
             >
               ← Starije
             </button>
+            <span className="muted" style={{ fontSize: 12 }}>Od</span>
+            <DateField
+              value={eventsFrom}
+              min={EVENTS_FLOOR}
+              max={eventsEnd}
+              onChange={(d) => setEventsFrom(d < EVENTS_FLOOR ? EVENTS_FLOOR : d > eventsEnd ? eventsEnd : d)}
+            />
+            <span className="muted" style={{ fontSize: 12 }}>Do</span>
             <DateField
               value={eventsEnd}
-              min={EVENTS_FLOOR}
+              min={eventsFrom}
               max={today()}
-              onChange={(d) => setEventsEnd(d < EVENTS_FLOOR ? EVENTS_FLOOR : d)}
+              onChange={(d) => setEventsEnd(d < eventsFrom ? eventsFrom : d > today() ? today() : d)}
             />
             <button
               className="btn secondary"
-              onClick={() => pageEvents(EVENTS_PAGE_DAYS)}
+              onClick={() => pageEvents(1)}
               disabled={eventsLoading || eventsEnd >= today()}
             >
               Novije →
