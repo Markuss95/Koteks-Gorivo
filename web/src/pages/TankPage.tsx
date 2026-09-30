@@ -46,6 +46,10 @@ const EVENT_ORDER: TankEventKind[] = [
   'refuel_no_slip',
 ];
 
+// Shown until the user changes the filter: every kind except refuels without a
+// slip, which can still be ticked on.
+const DEFAULT_KINDS = EVENT_ORDER.filter((k) => k !== 'refuel_no_slip');
+
 export const SENSOR_LABELS: Record<SensorQuality, string> = {
   fine: 'precizan',
   coarse: 'grub',
@@ -163,7 +167,7 @@ export function TankPage({
   const [groups, setGroups] = useState<Set<MachineGroup>>(
     () => new Set<MachineGroup>([allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek']),
   );
-  const [kinds, setKinds] = useState<Set<TankEventKind>>(() => new Set(EVENT_ORDER));
+  const [kinds, setKinds] = useState<Set<TankEventKind>>(() => new Set(DEFAULT_KINDS));
   const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
   // Table sorts; null keeps each table's default order.
   const [sort, setSort] = useState<Sort<MachineSortKey> | null>(null);
@@ -313,7 +317,7 @@ export function TankPage({
   const focused = kinds.size === 1 ? [...kinds][0] : null;
   const eventsRef = useRef<HTMLDivElement>(null);
   const focusKind = (k: TankEventKind | null) => {
-    setKinds(k === null || focused === k ? new Set(EVENT_ORDER) : new Set([k]));
+    setKinds(k === null || focused === k ? new Set(DEFAULT_KINDS) : new Set([k]));
     eventsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
