@@ -208,6 +208,14 @@ export function TankPage({
     };
   }, [groupEvents, machines]);
 
+  // The card whose kind is the only one shown, if any.
+  const focused = kinds.size === 1 ? [...kinds][0] : null;
+  const eventsRef = useRef<HTMLDivElement>(null);
+  const focusKind = (k: TankEventKind | null) => {
+    setKinds(k === null || focused === k ? new Set(EVENT_ORDER) : new Set([k]));
+    eventsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const toggleKind = (k: TankEventKind) =>
     setKinds((prev) => {
       const next = new Set(prev);
@@ -271,28 +279,49 @@ export function TankPage({
         </div>
       )}
 
+      {/* Clicking a card narrows the events list to that kind (again = all kinds). */}
       <div className="cards">
-        <div className="card">
+        <div
+          className={`card clickable${focused === 'drain' ? ' active' : ''}`}
+          onClick={() => focusKind('drain')}
+          title="Prikaži samo odljeve u popisu događaja"
+        >
           <div className="label">Odljevi iz spremnika</div>
           <div className={`value ${totals.drains ? 'neg' : ''}`}>{totals.drains}</div>
           <div className="sub">{fmt(totals.drainLitres, 0)} L bez potrošnje motora</div>
         </div>
-        <div className="card">
+        <div
+          className={`card clickable${focused === 'cycle_loss' ? ' active' : ''}`}
+          onClick={() => focusKind('cycle_loss')}
+          title="Prikaži samo manjak između punjenja u popisu događaja"
+        >
           <div className="label">Manjak između punjenja</div>
           <div className={`value ${totals.cycles ? 'neg' : ''}`}>{totals.cycles}</div>
           <div className="sub">{fmt(totals.cycleLitres, 0)} L nije potrošio motor</div>
         </div>
-        <div className="card">
+        <div
+          className={`card clickable${focused === 'slip_no_refuel' ? ' active' : ''}`}
+          onClick={() => focusKind('slip_no_refuel')}
+          title="Prikaži samo izdatnice bez dolijevanja u popisu događaja"
+        >
           <div className="label">Izdatnice bez dolijevanja</div>
           <div className={`value ${totals.noRefuel ? 'neg' : ''}`}>{totals.noRefuel}</div>
           <div className="sub">senzor nije vidio dolijevanje</div>
         </div>
-        <div className="card">
+        <div
+          className={`card clickable${focused === 'slip_mismatch' ? ' active' : ''}`}
+          onClick={() => focusKind('slip_mismatch')}
+          title="Prikaži samo izdatnice koje se ne slažu s dolijevanjem"
+        >
           <div className="label">Izdatnica ≠ dolijevanje</div>
           <div className={`value ${totals.mismatch ? 'neg' : ''}`}>{totals.mismatch}</div>
           <div className="sub">izdano i uliveno se razlikuju</div>
         </div>
-        <div className="card">
+        <div
+          className="card clickable"
+          onClick={() => focusKind(null)}
+          title="Prikaži sve vrste događaja"
+        >
           <div className="label">Provjerene izdatnice</div>
           <div className="value">
             {totals.slipsOk}/{totals.slips}
@@ -301,7 +330,7 @@ export function TankPage({
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel" ref={eventsRef}>
         <div className="panel-head">
           <h2>
             Sumnjivi događaji ({events.length}){' '}
@@ -420,6 +449,14 @@ export function TankPage({
                     {m.capacityCorrected && (
                       <span className="pill warn" title="Kapacitet spremnika ručno ispravljen">
                         ispravljen spremnik
+                      </span>
+                    )}
+                    {m.capacitySuspect && (
+                      <span
+                        className="pill warn"
+                        title="Izdatnice su redom višekratnik porasta u spremniku — kapacitet je vjerojatno krivo zadan"
+                      >
+                        provjeri kapacitet
                       </span>
                     )}
                   </td>

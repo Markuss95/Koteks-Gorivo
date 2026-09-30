@@ -618,6 +618,26 @@ function CapacityLine({
           </button>
         </span>
       )}
+      {data.capacityHint && data.tankCapacity != null && (
+        <div className="hint-box">
+          Izdatnice su redom oko <strong>{fmt(data.capacityHint.ratio, 2)}×</strong> veće od porasta
+          razine u spremniku (slaže se {data.capacityHint.agreeing} od {data.capacityHint.slips}). To
+          obično znači da je kapacitet spremnika krivo zadan: umjesto{' '}
+          {fmt(data.tankCapacity, 0)} L vjerojatno je oko{' '}
+          <strong>{fmt(data.capacityHint.suggestedLitres, 0)} L</strong>. Provjerite stvarni kapacitet
+          stroja — dok nije ispravan, litre sa senzora (dolijevanja, odljevi, manjak) su pogrešne.
+          {isAdmin && (
+            <button
+              className="btn secondary"
+              style={{ padding: '3px 10px', fontSize: 12, marginLeft: 8 }}
+              disabled={saving}
+              onClick={() => save(data.capacityHint!.suggestedLitres)}
+            >
+              Postavi {fmt(data.capacityHint.suggestedLitres, 0)} L
+            </button>
+          )}
+        </div>
+      )}
       {error && <div className="error-box" style={{ marginTop: 8 }}>{error}</div>}
     </div>
   );

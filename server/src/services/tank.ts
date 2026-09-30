@@ -20,9 +20,23 @@ import type { MachineGroup } from './groups.js';
 // a slope or fuel sloshing.
 const K = 3;
 
-// A rise counts as a refuel when it exceeds both of these.
+// A rise counts as a refuel when it exceeds all of these. On a coarse sensor a
+// single step up that holds for a few readings is noise, so a refuel must span
+// more than one of the sensor's steps.
 const REFUEL_MIN_LITRES = 15;
 const REFUEL_MIN_FRACTION = 0.06;
+const REFUEL_MIN_SENSOR_STEPS = 1.5;
+
+// Tank-size hint. A wrong capacity in LiDAT scales every rise the sensor shows,
+// so the matched slips all come out the same multiple of their rise (91991: ~1.85×
+// with 201 L; all matched at 360 L). Hint when enough slips agree on a multiple
+// that far from 1.
+const CAPACITY_HINT_MIN_SLIPS = 3;
+const CAPACITY_HINT_MIN_RISE_LITRES = 30; // small top-ups give noisy ratios
+const CAPACITY_HINT_AGREE = 0.15; // a ratio "agrees" within ±15 % of the median
+const CAPACITY_HINT_AGREEING_SHARE = 2 / 3;
+const CAPACITY_HINT_LOW = 0.8;
+const CAPACITY_HINT_HIGH = 1.25;
 
 // A drop is flagged when the level fell this much more than the engine burned.
 // Below one jerry can, well above the noise of a precise sensor. It must also
@@ -157,6 +171,15 @@ export interface TankMachineAnalysis {
   cycles: TankCycle[];
   slips: TankSlipCheck[];
   refuelsWithoutSlip: TankRefuel[];
+  // Slips consistently a multiple of the tank rise: the capacity is likely wrong.
+  capacityHint: CapacityHint | null;
+}
+
+export interface CapacityHint {
+  ratio: number; // median Maris / tank rise
+  agreeing: number; // slips within ±15 % of that ratio
+  slips: number; // slips considered
+  suggestedLitres: number; // current capacity × ratio
 }
 
 export interface TankMachineSummary {
@@ -182,6 +205,7 @@ export interface TankMachineSummary {
   cycleCount: number;
   cycleRefilledLitres: number;
   cycleMissingLitres: number;
+  capacitySuspect: boolean;
 }
 
 export type TankEventKind =
@@ -418,8 +442,12 @@ function findSteps(
   return out;
 }
 
-function detectRefuels(levels: LevelPoint[], capacity: number): TankRefuel[] {
-  const threshold = Math.max(REFUEL_MIN_LITRES, REFUEL_MIN_FRACTION * capacity);
+function detectRefuels(levels: LevelPoint[], capacity: number, stepLitres: number): TankRefuel[] {
+  const threshold = Math.max(
+    REFUEL_MIN_LITRES,
+    REFUEL_MIN_FRACTION * capacity,
+    REFUEL_MIN_SENSOR_STEPS * stepLitres,
+  );
   return findSteps(
     levels.map((p) => p.litres),
     levels.map((p) => p.ms),
@@ -654,6 +682,25 @@ function slipsFor(m: Machine, byRnalog: Map<string, SlipInput[]>): SlipInput[] {
   return m.rnalogs.flatMap((r) => byRnalog.get(r.trim()) ?? []);
 }
 
+/** See CAPACITY_HINT_*: a consistent Maris-to-rise multiple far from 1. */
+function capacityHint(checks: TankSlipCheck[], capacity: number | null): CapacityHint | null {
+  if (!capacity) return null;
+  const ratios = checks
+    .filter((c) => c.tankLitres !== null && c.tankLitres >= CAPACITY_HINT_MIN_RISE_LITRES)
+    .map((c) => c.marisLitres / c.tankLitres!);
+  if (ratios.length < CAPACITY_HINT_MIN_SLIPS) return null;
+  const ratio = median(ratios);
+  if (ratio >= CAPACITY_HINT_LOW && ratio <= CAPACITY_HINT_HIGH) return null;
+  const agreeing = ratios.filter((r) => Math.abs(r / ratio - 1) <= CAPACITY_HINT_AGREE).length;
+  if (agreeing < CAPACITY_HINT_AGREEING_SHARE * ratios.length) return null;
+  return {
+    ratio: Math.round(ratio * 100) / 100,
+    agreeing,
+    slips: ratios.length,
+    suggestedLitres: Math.round((capacity * ratio) / 5) * 5,
+  };
+}
+
 function capacityOverrides(): Record<string, number> {
   return getJsonSetting<Record<string, number>>(CAPACITY_OVERRIDES_KEY, {});
 }
@@ -712,7 +759,7 @@ function analyseMachine(
   const stepLitres = stepPct !== null && capacity ? (stepPct / 100) * capacity : 0;
   const burn = burnIndex(loadFuel(m.serialNumber, loadFrom, loadTo));
 
-  const refuels = capacity ? detectRefuels(levels, capacity) : [];
+  const refuels = capacity ? detectRefuels(levels, capacity, stepLitres) : [];
   const drains =
     capacity && quality === 'fine' ? detectDrains(levels, burn, capacity, stepLitres) : [];
   const levelDays = new Set(levels.map((p) => localDay(p.time)));
@@ -745,6 +792,10 @@ function analyseMachine(
     slips: checks.filter((c) => inRange(c.date)),
     // Without Maris every refuel would look slip-less — say nothing instead.
     refuelsWithoutSlip: marisOk ? unmatched.filter((r) => inRange(localDay(r.time))) : [],
+    capacityHint: capacityHint(
+      checks.filter((c) => inRange(c.date)),
+      capacity,
+    ),
   };
   return { analysis, levels: levels.filter((p) => inRange(localDay(p.time))) };
 }
@@ -775,6 +826,7 @@ function summarise(a: TankMachineAnalysis): TankMachineSummary {
     cycleCount: a.cycles.length,
     cycleRefilledLitres: sum(a.cycles, (c) => c.refilledLitres),
     cycleMissingLitres: sum(a.cycles, (c) => c.missingLitres),
+    capacitySuspect: a.capacityHint !== null,
   };
 }
 

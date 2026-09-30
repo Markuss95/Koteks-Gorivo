@@ -217,6 +217,15 @@ export interface TankMachineSummary {
   cycleCount: number;
   cycleRefilledLitres: number;
   cycleMissingLitres: number;
+  capacitySuspect: boolean;
+}
+
+/** Slips consistently a multiple of the tank rise: the capacity is likely wrong. */
+export interface CapacityHint {
+  ratio: number;
+  agreeing: number;
+  slips: number;
+  suggestedLitres: number;
 }
 
 export type TankEventKind =
@@ -270,6 +279,7 @@ export interface TankDetail {
   cycles: TankCycle[];
   slips: TankSlipCheck[];
   refuelsWithoutSlip: TankRefuel[];
+  capacityHint: CapacityHint | null;
   from: string;
   to: string;
   marisError: string | null;
