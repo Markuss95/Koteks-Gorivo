@@ -173,6 +173,10 @@ tbody tr.clickable { cursor: pointer; }
 .drawer-head h2 { margin: 0; }
 .close { background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; }
 
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }
+
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .tag button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; }

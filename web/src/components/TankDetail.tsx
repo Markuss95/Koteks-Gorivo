@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
-  Scatter,
   Tooltip,
   XAxis,
   YAxis,
@@ -87,17 +86,34 @@ export function TankDetail({
     () => (data?.levelSeries ?? []).map((p) => ({ t: Date.parse(p.t), litres: p.litres })),
     [data],
   );
-  const refuelPoints = useMemo(
-    () => (data?.refuels ?? []).map((r) => ({ t: Date.parse(r.time), litres: r.levelAfter })),
+  // Each refuel / drain is drawn over the stretch of line where it happened: from
+  // the last reading before it to the first one after, level before → after.
+  const refuelMarks = useMemo(
+    () =>
+      (data?.refuels ?? []).map((r) => ({
+        t0: Date.parse(r.prevTime),
+        t1: Date.parse(r.time),
+        from: r.levelBefore,
+        to: r.levelAfter,
+        litres: r.litres,
+      })),
     [data],
   );
-  const drainPoints = useMemo(
-    () => (data?.drains ?? []).map((d) => ({ t: Date.parse(d.time), litres: d.levelAfter })),
+  const drainMarks = useMemo(
+    () =>
+      (data?.drains ?? []).map((d) => ({
+        t0: Date.parse(d.prevTime),
+        t1: Date.parse(d.time),
+        from: d.levelBefore,
+        to: d.levelAfter,
+        litres: d.litres,
+      })),
     [data],
   );
+  // Labels get crowded on long ranges; the tables below list every event anyway.
+  const showMarkLabels = refuelMarks.length + drainMarks.length <= 20;
 
-  // Explicit time axis: with the markers carrying their own data, Recharts would
-  // otherwise take the axis range from the last marker series, not the level line.
+  // Explicit time axis from the level line itself.
   const xDomain = useMemo<[number, number]>(
     () => (series.length ? [series[0].t, series[series.length - 1].t] : [0, 1]),
     [series],
@@ -227,7 +243,17 @@ export function TankDetail({
                       labelFormatter={(t) => fmtDateTime(new Date(t as number).toISOString())}
                       formatter={(v: number, name) => [`${fmt(v, 0)} L`, name]}
                     />
-                    <Legend />
+                    {/* When fuel left unburned: a light band over the time it happened. */}
+                    {drainMarks.map((d) => (
+                      <ReferenceArea
+                        key={`band-${d.t1}`}
+                        x1={d.t0}
+                        x2={d.t1}
+                        fill="#f85149"
+                        fillOpacity={0.12}
+                        ifOverflow="hidden"
+                      />
+                    ))}
                     {cap && (
                       <ReferenceLine
                         y={cap}
@@ -245,28 +271,69 @@ export function TankDetail({
                       dot={false}
                       isAnimationActive={false}
                     />
-                    <Scatter
-                      data={refuelPoints}
-                      dataKey="litres"
-                      name="Dolijevanje"
-                      fill="#3fb950"
-                      shape="triangle"
-                      isAnimationActive={false}
-                    />
-                    <Scatter
-                      data={drainPoints}
-                      dataKey="litres"
-                      name="Odljev"
-                      fill="#f85149"
-                      shape="diamond"
-                      isAnimationActive={false}
-                    />
+                    {/* The stretch of line where fuel went in (green) or left unburned (red). */}
+                    {refuelMarks.map((r) => (
+                      <ReferenceLine
+                        key={`refuel-${r.t1}`}
+                        segment={[
+                          { x: r.t0, y: r.from },
+                          { x: r.t1, y: r.to },
+                        ]}
+                        stroke="#3fb950"
+                        strokeWidth={4}
+                        ifOverflow="hidden"
+                        label={
+                          showMarkLabels
+                            ? { value: `+${fmt(r.litres, 0)} L`, fill: '#3fb950', fontSize: 11, position: 'left' }
+                            : undefined
+                        }
+                      />
+                    ))}
+                    {drainMarks.map((d) => (
+                      <ReferenceLine
+                        key={`drain-${d.t1}`}
+                        segment={[
+                          { x: d.t0, y: d.from },
+                          { x: d.t1, y: d.to },
+                        ]}
+                        stroke="#f85149"
+                        strokeWidth={5}
+                        ifOverflow="hidden"
+                        label={
+                          showMarkLabels
+                            ? {
+                                value: `−${fmt(d.litres, 0)} L`,
+                                fill: '#f85149',
+                                fontSize: 12,
+                                fontWeight: 700,
+                                position: 'right',
+                              }
+                            : undefined
+                        }
+                      />
+                    ))}
                   </ComposedChart>
                 </ResponsiveContainer>
               ) : (
                 <div className="muted">
                   Nema podataka o razini u razdoblju.
                   {data.firstLevelTime && ` Razina se za ovaj stroj prikuplja od ${fmtDateTime(data.firstLevelTime)}.`}
+                </div>
+              )}
+              {series.length > 1 && (
+                <div className="chart-legend">
+                  <span>
+                    <i style={{ background: '#f5a623', height: 2 }} /> Razina u spremniku
+                  </span>
+                  <span>
+                    <i style={{ background: '#3fb950' }} /> Dolijevanje (+ L uliveno)
+                  </span>
+                  {data.sensor === 'fine' && (
+                    <span>
+                      <i style={{ background: '#f85149' }} /> Odljev: gorivo je izašlo iz spremnika, a
+                      motor ga nije potrošio (− L)
+                    </span>
+                  )}
                 </div>
               )}
             </div>
