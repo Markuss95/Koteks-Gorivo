@@ -20,9 +20,7 @@ const MIN_DATE_FALLBACK = '2026-05-27';
 const DEFAULT_DAYS = 10;
 
 // Tank-level collection started on this day; nothing earlier to show.
-const EVENTS_FLOOR = '2026-09-16';
-// The events list shows this many days at a time, newest first.
-const EVENTS_PAGE_DAYS = 3;
+const TANK_FLOOR = '2026-09-16';
 
 function shiftDay(day: string, days: number): string {
   const d = new Date(`${day}T00:00:00Z`);
@@ -180,58 +178,29 @@ export function TankPage({
   const [sort, setSort] = useState<Sort<MachineSortKey> | null>(null);
   const [eventSort, setEventSort] = useState<Sort<EventSortKey> | null>(null);
 
-  // Events list: its own from/to window (default the last EVENTS_PAGE_DAYS),
-  // independent of the page's date range and paged by its own length.
-  const [eventsEnd, setEventsEnd] = useState(() => today());
-  const [eventsFrom, setEventsFrom] = useState(() => {
-    const start = shiftDay(today(), -(EVENTS_PAGE_DAYS - 1));
-    return start < EVENTS_FLOOR ? EVENTS_FLOOR : start;
-  });
-  const [eventsData, setEventsData] = useState<TankEvent[] | null>(null);
-  const [graceDays, setGraceDays] = useState<number | null>(null);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [eventsError, setEventsError] = useState<string | null>(null);
-  const eventsSeq = useRef(0);
-  const loadEvents = () => {
-    setEventsLoading(true);
-    setEventsError(null);
-    const seq = ++eventsSeq.current;
-    api
-      .tankOverview(eventsFrom, eventsEnd)
-      .then((d) => {
-        if (seq !== eventsSeq.current) return;
-        setEventsData(d.events);
-        setGraceDays(d.marisGraceDays);
-      })
-      .catch((e) => {
-        if (seq === eventsSeq.current) setEventsError(e.message);
-      })
-      .finally(() => {
-        if (seq === eventsSeq.current) setEventsLoading(false);
-      });
-  };
-  useEffect(() => {
-    loadEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventsFrom, eventsEnd]);
-  // Move the whole window by its own length (-1 older, +1 newer), keeping its
-  // length but never crossing the collection floor or today.
-  const pageEvents = (direction: -1 | 1) => {
+  // One range drives the whole tab: cards, events list and per-machine table.
+  // The shared range may start before tank data exists (other tabs go back to
+  // June); this tab shows it from TANK_FLOOR without changing it for the others.
+  const viewFrom = from < TANK_FLOOR ? TANK_FLOOR : from;
+
+  // Move the range by its own length (-1 older, +1 newer), keeping its length
+  // but never crossing the collection floor or today.
+  const pageRange = (direction: -1 | 1) => {
     const len =
-      Math.round((Date.parse(`${eventsEnd}T00:00:00Z`) - Date.parse(`${eventsFrom}T00:00:00Z`)) / 86_400_000) + 1;
-    let from = shiftDay(eventsFrom, direction * len);
-    let to = shiftDay(eventsEnd, direction * len);
-    if (from < EVENTS_FLOOR) {
-      from = EVENTS_FLOOR;
-      to = shiftDay(EVENTS_FLOOR, len - 1);
+      Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${viewFrom}T00:00:00Z`)) / 86_400_000) + 1;
+    let nextFrom = shiftDay(viewFrom, direction * len);
+    let nextTo = shiftDay(to, direction * len);
+    if (nextFrom < TANK_FLOOR) {
+      nextFrom = TANK_FLOOR;
+      nextTo = shiftDay(TANK_FLOOR, len - 1);
     }
-    if (to > today()) {
-      to = today();
-      from = shiftDay(to, -(len - 1));
-      if (from < EVENTS_FLOOR) from = EVENTS_FLOOR;
+    if (nextTo > today()) {
+      nextTo = today();
+      nextFrom = shiftDay(nextTo, -(len - 1));
+      if (nextFrom < TANK_FLOOR) nextFrom = TANK_FLOOR;
     }
-    setEventsFrom(from);
-    setEventsEnd(to);
+    setFrom(nextFrom);
+    setTo(nextTo);
   };
 
   // Latest request wins; an older, slower response can't overwrite a newer one.
@@ -241,7 +210,7 @@ export function TankPage({
     setError(null);
     const seq = ++reqSeq.current;
     api
-      .tankOverview(from, to)
+      .tankOverview(viewFrom, to)
       .then((d) => {
         if (seq === reqSeq.current) setData(d);
       })
@@ -263,9 +232,10 @@ export function TankPage({
   useEffect(() => {
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to]);
+  }, [viewFrom, to]);
 
   const effectiveMin = useMemo(() => effectiveDateFloor(minDate, groups), [minDate, groups]);
+  const pickerMin = effectiveMin > TANK_FLOOR ? effectiveMin : TANK_FLOOR;
   useEffect(() => {
     if (from < effectiveMin) setFrom(effectiveMin);
   }, [effectiveMin, from]);
@@ -304,9 +274,10 @@ export function TankPage({
     [data, groups],
   );
   const events = useMemo(() => {
-    const rows = (eventsData ?? []).filter((e) => groups.has(e.group) && kinds.has(e.kind));
+    const rows = groupEvents.filter((e) => kinds.has(e.kind));
     return eventSort ? rows.sort(compareBy(eventValue, eventSort)) : rows;
-  }, [eventsData, groups, kinds, eventSort]);
+  }, [groupEvents, kinds, eventSort]);
+  const graceDays = data?.marisGraceDays ?? null;
 
   const totals = useMemo(() => {
     const of = (k: TankEventKind) => groupEvents.filter((e) => e.kind === k);
@@ -346,11 +317,11 @@ export function TankPage({
       <div className="toolbar">
         <div className="field">
           <label>Od datuma</label>
-          <DateField value={from} min={effectiveMin} max={to} onChange={setFrom} />
+          <DateField value={viewFrom} min={pickerMin} max={to} onChange={setFrom} />
         </div>
         <div className="field">
           <label>Do datuma</label>
-          <DateField value={to} min={from || effectiveMin} max={today()} onChange={setTo} />
+          <DateField value={to} min={viewFrom} max={today()} onChange={setTo} />
         </div>
         <button className="btn" onClick={run} disabled={loading}>
           {loading ? 'Učitavanje…' : 'Prikaži'}
@@ -453,35 +424,23 @@ export function TankPage({
           <h2>
             Sumnjivi događaji ({events.length}){' '}
             <span className="muted" style={{ fontWeight: 400 }}>
-              {fmtDate(eventsFrom)} – {fmtDate(eventsEnd)}
+              {fmtDate(viewFrom)} – {fmtDate(to)}
             </span>
           </h2>
           <div className="panel-actions" style={{ alignItems: 'center' }}>
             <button
               className="btn secondary"
-              onClick={() => pageEvents(-1)}
-              disabled={eventsLoading || eventsFrom <= EVENTS_FLOOR}
+              onClick={() => pageRange(-1)}
+              disabled={loading || viewFrom <= TANK_FLOOR}
+              title="Isto razdoblje unatrag (mijenja i datume gore)"
             >
               ← Starije
             </button>
-            <span className="muted" style={{ fontSize: 12 }}>Od</span>
-            <DateField
-              value={eventsFrom}
-              min={EVENTS_FLOOR}
-              max={eventsEnd}
-              onChange={(d) => setEventsFrom(d < EVENTS_FLOOR ? EVENTS_FLOOR : d > eventsEnd ? eventsEnd : d)}
-            />
-            <span className="muted" style={{ fontSize: 12 }}>Do</span>
-            <DateField
-              value={eventsEnd}
-              min={eventsFrom}
-              max={today()}
-              onChange={(d) => setEventsEnd(d < eventsFrom ? eventsFrom : d > today() ? today() : d)}
-            />
             <button
               className="btn secondary"
-              onClick={() => pageEvents(1)}
-              disabled={eventsLoading || eventsEnd >= today()}
+              onClick={() => pageRange(1)}
+              disabled={loading || to >= today()}
+              title="Isto razdoblje unaprijed (mijenja i datume gore)"
             >
               Novije →
             </button>
@@ -495,8 +454,7 @@ export function TankPage({
             </label>
           ))}
         </div>
-        {eventsError && <div className="error-box">{eventsError}</div>}
-        {eventsLoading ? (
+        {loading ? (
           <div className="spinner">Učitavanje…</div>
         ) : (
           <table>
