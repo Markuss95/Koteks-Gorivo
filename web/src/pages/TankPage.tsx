@@ -174,8 +174,9 @@ export function TankPage({
   );
   const [kinds, setKinds] = useState<Set<TankEventKind>>(() => new Set(DEFAULT_KINDS));
   const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
-  // Table sorts; null keeps each table's default order.
-  const [sort, setSort] = useState<Sort<MachineSortKey> | null>(null);
+  // Machine table opens sorted by sensor precision, most precise first; the
+  // events table keeps its default (newest first) until a column is chosen.
+  const [sort, setSort] = useState<Sort<MachineSortKey>>({ key: 'sensor', dir: -1 });
   const [eventSort, setEventSort] = useState<Sort<EventSortKey> | null>(null);
 
   // One range drives the whole tab: cards, events list and per-machine table.
@@ -243,21 +244,15 @@ export function TankPage({
   const machines = useMemo<TankMachineSummary[]>(() => {
     if (!data) return [];
     const loss = (m: TankMachineSummary) => Math.max(m.drainLitres, m.cycleMissingLitres);
-    const rows = data.machines.filter((m) => groups.has(m.group));
-    if (!sort) {
-      // Until a column is chosen: the biggest losses first.
-      return rows.sort(
-        (a, b) =>
-          loss(b) - loss(a) ||
-          b.slipMismatch + b.slipNoRefuel - (a.slipMismatch + a.slipNoRefuel) ||
-          b.levelReadings - a.levelReadings,
-      );
-    }
-    return rows.sort(compareBy(machineValue, sort));
+    const byColumn = compareBy(machineValue, sort);
+    // Ties (e.g. same sensor class and step) put the biggest losses first.
+    return data.machines
+      .filter((m) => groups.has(m.group))
+      .sort((a, b) => byColumn(a, b) || loss(b) - loss(a));
   }, [data, groups, sort]);
 
   const th = (label: string, key: MachineSortKey, num = false) => (
-    <Th label={label} num={num} onClick={() => setSort(nextSort(key))} active={sort?.key === key} dir={sort?.dir ?? -1} />
+    <Th label={label} num={num} onClick={() => setSort(nextSort(key))} active={sort.key === key} dir={sort.dir} />
   );
   const eventTh = (label: string, key: EventSortKey, num = false) => (
     <Th
