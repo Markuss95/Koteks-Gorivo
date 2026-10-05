@@ -39,11 +39,10 @@ const CAPACITY_HINT_AGREEING_SHARE = 2 / 3;
 const CAPACITY_HINT_LOW = 0.8;
 const CAPACITY_HINT_HIGH = 1.25;
 
-// A drop is flagged when the level fell this much more than the engine burned.
-// Below one jerry can, well above the noise of a precise sensor. It must also
-// span at least two of the sensor's own steps.
+// A drop is flagged when the level fell at least this much more than the engine
+// burned, whatever the tank size; anything smaller counts as normal use. It must
+// also span at least two of the sensor's own steps, or it can't be told from noise.
 const DRAIN_MIN_LITRES = 15;
-const DRAIN_MIN_FRACTION = 0.04;
 const DRAIN_MIN_SENSOR_STEPS = 2;
 
 // Steps closer together than this are one event (a fill in two goes).
@@ -423,9 +422,9 @@ interface Step {
 }
 
 /**
- * Persistent upward steps in `values`: one reading jumps at least half the
- * threshold AND the median of the next K readings clears the median of the
- * previous K by the full threshold. Steps within MERGE_HOURS are one event.
+ * Persistent upward steps in `values`: one reading jumps more than half the
+ * threshold AND the median of the next K readings is at least the full
+ * threshold above the median of the previous K. Steps within MERGE_HOURS are one event.
  */
 function findSteps(
   values: number[],
@@ -439,7 +438,7 @@ function findSteps(
     if (values[i] - values[i - 1] <= threshold / 2) continue;
     const before = median(values.slice(i - K, i));
     const after = median(values.slice(i, i + K));
-    if (after - before <= threshold) continue;
+    if (after - before < threshold) continue;
     const last = out[out.length - 1];
     if (last && ms[i] - ms[last.end] < MERGE_HOURS * HOUR_MS) {
       last.end = i;
@@ -475,12 +474,7 @@ function detectRefuels(levels: LevelPoint[], capacity: number, stepLitres: numbe
  * −(litres in tank + litres burned so far): it stays flat while the engine burns
  * what leaves the tank, falls at a refuel, and rises when fuel leaves unburned.
  */
-function detectDrains(
-  levels: LevelPoint[],
-  burn: BurnIndex,
-  capacity: number,
-  stepLitres: number,
-): TankDrain[] {
+function detectDrains(levels: LevelPoint[], burn: BurnIndex, stepLitres: number): TankDrain[] {
   if (levels.length === 0) return [];
   const burnedAt = levels.map((p) => burn.at(p.ms) ?? 0);
   const covered = levels.map((p) => burn.covered(p.ms));
@@ -489,11 +483,7 @@ function detectDrains(
     for (let k = i - K; k < i + K; k++) if (!covered[k]) return false;
     return true;
   };
-  const threshold = Math.max(
-    DRAIN_MIN_LITRES,
-    DRAIN_MIN_FRACTION * capacity,
-    DRAIN_MIN_SENSOR_STEPS * stepLitres,
-  );
+  const threshold = Math.max(DRAIN_MIN_LITRES, DRAIN_MIN_SENSOR_STEPS * stepLitres);
 
   return findSteps(
     unexplained,
@@ -770,7 +760,7 @@ function analyseMachine(
 
   const refuels = capacity ? detectRefuels(levels, capacity, stepLitres) : [];
   const drains =
-    capacity && quality === 'fine' ? detectDrains(levels, burn, capacity, stepLitres) : [];
+    capacity && quality === 'fine' ? detectDrains(levels, burn, stepLitres) : [];
   const levelDays = new Set(levels.map((p) => localDay(p.time)));
   const { checks, unmatched } = checkSlips(slips, refuels, levelDays, stepLitres);
   // Refuels on or after this day may still get their izdatnica.
