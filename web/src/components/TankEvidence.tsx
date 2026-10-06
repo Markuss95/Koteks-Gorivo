@@ -76,15 +76,27 @@ export function ReviewBadge({ review }: { review: TankReview | null }) {
 }
 
 /** Compact, for the machine table: Maris ✓ 0,98 · brojač ✓ 1,13. */
+// What each check means, shown on hover.
+const CHECK_HELP_LEGEND =
+  'Zadnjih 30 dana. ✓ slaže se · ✗ ne slaže se · ? još premalo podataka. Broj je omjer (1,00 = savršeno slaganje).\n' +
+  'Ne mijenja nikakve brojke — samo odlučuje mogu li događaji ovog stroja biti „siguran” ili traže „provjeriti”.';
+const MARIS_HELP =
+  'Maris: odgovara li porast razine pri svakom punjenju litrama s izdatnice? Ako ne, kapacitet spremnika u ' +
+  `LiDAT-u vjerojatno je krivo zadan.\n\n${CHECK_HELP_LEGEND}`;
+const COUNTER_HELP =
+  'Brojač: pada li razina u spremniku za onoliko koliko je motor potrošio prema brojaču potrošnje?' +
+  `\n\n${CHECK_HELP_LEGEND}`;
+const HELP_STYLE = { cursor: 'help' } as const;
+
 export function CalibrationCell({ calibration }: { calibration: TankCalibration }) {
   const { maris, counter } = calibration;
   return (
-    <span title="Usporedba senzora razine s izdatnicama (Maris) i s brojačem potrošnje, zadnjih 30 dana">
-      <span className={CHECK[maris.status].cls}>
+    <span>
+      <span className={CHECK[maris.status].cls} title={MARIS_HELP} style={HELP_STYLE}>
         Maris {CHECK[maris.status].mark} {ratioText(maris.ratio)}
       </span>
       <span className="muted"> · </span>
-      <span className={CHECK[counter.status].cls}>
+      <span className={CHECK[counter.status].cls} title={COUNTER_HELP} style={HELP_STYLE}>
         brojač {CHECK[counter.status].mark} {ratioText(counter.ratio)}
       </span>
     </span>
@@ -97,17 +109,23 @@ export function CalibrationLine({ calibration }: { calibration: TankCalibration 
   return (
     <div style={{ marginBottom: 12 }}>
       <span className="muted">Provjera senzora (zadnjih 30 dana): </span>
-      izdatnice iz Marisa —{' '}
-      <span className={CHECK[maris.status].cls}>
-        {CHECK[maris.status].text}
-        {maris.ratio !== null && ` (omjer ${ratioText(maris.ratio)})`}
+      <span title={MARIS_HELP} style={HELP_STYLE}>
+        izdatnice iz Marisa —{' '}
+        <span className={CHECK[maris.status].cls}>
+          {CHECK[maris.status].text}
+          {maris.ratio !== null && ` (omjer ${ratioText(maris.ratio)})`}
+        </span>
+        <span className="muted">, {maris.slips} usporedivih</span>
       </span>
-      <span className="muted">, {maris.slips} usporedivih</span>; brojač potrošnje —{' '}
-      <span className={CHECK[counter.status].cls}>
-        {CHECK[counter.status].text}
-        {counter.ratio !== null && ` (omjer ${ratioText(counter.ratio)})`}
+      ;{' '}
+      <span title={COUNTER_HELP} style={HELP_STYLE}>
+        brojač potrošnje —{' '}
+        <span className={CHECK[counter.status].cls}>
+          {CHECK[counter.status].text}
+          {counter.ratio !== null && ` (omjer ${ratioText(counter.ratio)})`}
+        </span>
+        <span className="muted">, {fmt(counter.burnedLitres, 0)} L potrošnje za usporedbu</span>
       </span>
-      <span className="muted">, {fmt(counter.burnedLitres, 0)} L potrošnje za usporedbu</span>
     </div>
   );
 }
