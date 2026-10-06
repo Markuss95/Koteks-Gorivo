@@ -414,85 +414,6 @@ export function TankPage({
         </div>
       </div>
 
-      <div className="panel" ref={eventsRef}>
-        <div className="panel-head">
-          <h2>
-            Sumnjivi događaji ({events.length}){' '}
-            <span className="muted" style={{ fontWeight: 400 }}>
-              {fmtDate(viewFrom)} – {fmtDate(to)}
-            </span>
-          </h2>
-          <div className="panel-actions" style={{ alignItems: 'center' }}>
-            <button
-              className="btn secondary"
-              onClick={() => pageRange(-1)}
-              disabled={loading || viewFrom <= TANK_FLOOR}
-              title="Isto razdoblje unatrag (mijenja i datume gore)"
-            >
-              ← Starije
-            </button>
-            <button
-              className="btn secondary"
-              onClick={() => pageRange(1)}
-              disabled={loading || to >= today()}
-              title="Isto razdoblje unaprijed (mijenja i datume gore)"
-            >
-              Novije →
-            </button>
-          </div>
-        </div>
-        <div className="group-filter" style={{ marginBottom: 12 }}>
-          {EVENT_ORDER.map((k) => (
-            <label key={k} className="group-filter__item">
-              <input type="checkbox" checked={kinds.has(k)} onChange={() => toggleKind(k)} />
-              <span>{EVENT_LABELS[k]}</span>
-            </label>
-          ))}
-        </div>
-        {loading ? (
-          <div className="spinner">Učitavanje…</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                {eventTh('Datum', 'date')}
-                {eventTh('Vrijeme', 'time')}
-                {eventTh('Stroj', 'machine')}
-                {eventTh('Vrsta', 'kind')}
-                {eventTh('Opis', 'litres')}
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((e, i) => (
-                <tr
-                  key={`${e.serialNumber}-${e.kind}-${e.day}-${e.time ?? e.dokBroj}-${i}`}
-                  className="clickable"
-                  onClick={() => setDetail({ serial: e.serialNumber, model: e.model })}
-                  title="Prikaži razinu goriva u spremniku"
-                >
-                  <td>{fmtDate(e.day)}</td>
-                  <td className="muted">{clock(e.time)}</td>
-                  <td>
-                    <strong>{shortModel(e.model)}</strong> <span className="muted">{e.serialNumber}</span>
-                  </td>
-                  <td className={e.kind === 'refuel_awaiting_slip' ? 'muted' : e.kind === 'refuel_no_slip' ? '' : 'neg'}>
-                    {EVENT_LABELS[e.kind]}
-                  </td>
-                  <td className="muted">{eventDetail(e, graceDays)}</td>
-                </tr>
-              ))}
-              {events.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 30 }}>
-                    Nema sumnjivih događaja u odabranom razdoblju.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
-
       <div className="panel">
         <h2>Pregled po strojevima</h2>
         <div className="muted" style={{ marginBottom: 12 }}>
@@ -570,6 +491,85 @@ export function TankPage({
                 <tr>
                   <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 30 }}>
                     Nema strojeva u odabranoj grupi.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel" ref={eventsRef}>
+        <div className="panel-head">
+          <h2>
+            Sumnjivi događaji ({events.length}){' '}
+            <span className="muted" style={{ fontWeight: 400 }}>
+              {fmtDate(viewFrom)} – {fmtDate(to)}
+            </span>
+          </h2>
+          <div className="panel-actions" style={{ alignItems: 'center' }}>
+            <button
+              className="btn secondary"
+              onClick={() => pageRange(-1)}
+              disabled={loading || viewFrom <= TANK_FLOOR}
+              title="Isto razdoblje unatrag (mijenja i datume gore)"
+            >
+              ← Starije
+            </button>
+            <button
+              className="btn secondary"
+              onClick={() => pageRange(1)}
+              disabled={loading || to >= today()}
+              title="Isto razdoblje unaprijed (mijenja i datume gore)"
+            >
+              Novije →
+            </button>
+          </div>
+        </div>
+        <div className="group-filter" style={{ marginBottom: 12 }}>
+          {EVENT_ORDER.map((k) => (
+            <label key={k} className="group-filter__item">
+              <input type="checkbox" checked={kinds.has(k)} onChange={() => toggleKind(k)} />
+              <span>{EVENT_LABELS[k]}</span>
+            </label>
+          ))}
+        </div>
+        {loading ? (
+          <div className="spinner">Učitavanje…</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                {eventTh('Datum', 'date')}
+                {eventTh('Vrijeme', 'time')}
+                {eventTh('Stroj', 'machine')}
+                {eventTh('Vrsta', 'kind')}
+                {eventTh('Opis', 'litres')}
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e, i) => (
+                <tr
+                  key={`${e.serialNumber}-${e.kind}-${e.day}-${e.time ?? e.dokBroj}-${i}`}
+                  className="clickable"
+                  onClick={() => setDetail({ serial: e.serialNumber, model: e.model })}
+                  title="Prikaži razinu goriva u spremniku"
+                >
+                  <td>{fmtDate(e.day)}</td>
+                  <td className="muted">{clock(e.time)}</td>
+                  <td>
+                    <strong>{shortModel(e.model)}</strong> <span className="muted">{e.serialNumber}</span>
+                  </td>
+                  <td className={e.kind === 'refuel_awaiting_slip' ? 'muted' : e.kind === 'refuel_no_slip' ? '' : 'neg'}>
+                    {EVENT_LABELS[e.kind]}
+                  </td>
+                  <td className="muted">{eventDetail(e, graceDays)}</td>
+                </tr>
+              ))}
+              {events.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                    Nema sumnjivih događaja u odabranom razdoblju.
                   </td>
                 </tr>
               )}
