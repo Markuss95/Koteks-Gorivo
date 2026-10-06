@@ -106,6 +106,34 @@ export function initSchema(): void {
       FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
     );
 
+    -- Every GPS fix (ISO 15143-3 Locations), not just the day's last: where a
+    -- machine stood at the moment of a fuel-control event. Kept from when this
+    -- table was added (LiDAT serves ~14 days back).
+    CREATE TABLE IF NOT EXISTS lidat_location_fix (
+      serial_number TEXT NOT NULL,
+      reading_time  TEXT NOT NULL,           -- ISO 8601 UTC
+      latitude      REAL NOT NULL,
+      longitude     REAL NOT NULL,
+      fetched_at    TEXT NOT NULL,
+      PRIMARY KEY (serial_number, reading_time),
+      FOREIGN KEY (serial_number) REFERENCES machine(serial_number) ON DELETE CASCADE
+    );
+
+    -- What someone found when checking a fuel-control event: 'confirmed' or
+    -- 'false_alarm', with a note. event_key is the event's stable id.
+    CREATE TABLE IF NOT EXISTS tank_event_review (
+      event_key     TEXT PRIMARY KEY,
+      serial_number TEXT NOT NULL,
+      kind          TEXT NOT NULL,
+      event_day     TEXT NOT NULL,           -- local day of the event, YYYY-MM-DD
+      verdict       TEXT NOT NULL,
+      note          TEXT NOT NULL DEFAULT '',
+      user_id       INTEGER,
+      username      TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tank_event_review_serial ON tank_event_review (serial_number);
+
     CREATE TABLE IF NOT EXISTS setting (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL

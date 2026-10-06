@@ -175,10 +175,14 @@ export interface TankDrain {
   returnedLitres: number; // part of the drop the reading got back soon after (or had gained just before)
   levelBefore: number;
   levelAfter: number;
-  // The machine's stored GPS fix for that day, if any.
+  minLitres: number; // the threshold it had to clear
+  engineHours: number | null; // engine running time between the readings either side
+  // Where the machine stood (its GPS fix nearest the drop, or that day's), and
+  // how far it moved between the fixes before and after.
   latitude: number | null;
   longitude: number | null;
   locationTime: string | null;
+  movedMetres: number | null;
 }
 
 // 'too_small': no rise found, but the slip is too small for this sensor to show.
@@ -199,6 +203,41 @@ export interface TankSlipCheck {
   // against this many fills (two for one slip covering a fill in two goes).
   sharedWith: number[];
   fills: number;
+  sensorThatDay: boolean;
+}
+
+export type CheckStatus = 'ok' | 'off' | 'unknown';
+
+/** The machine against what is metered, over the 30 days up to the range end. */
+export interface TankCalibration {
+  maris: { status: CheckStatus; ratio: number | null; slips: number }; // tank rise ÷ booked
+  counter: { status: CheckStatus; ratio: number | null; burnedLitres: number }; // level drop ÷ burned
+}
+
+export interface EventReason {
+  ok: boolean; // false: something to check before acting on the event
+  text: string;
+}
+
+export type Confidence = 'sure' | 'check';
+
+export type ReviewVerdict = 'confirmed' | 'false_alarm';
+
+export interface TankReview {
+  verdict: ReviewVerdict;
+  note: string;
+  username: string;
+  updatedAt: string;
+}
+
+/** The raw readings behind an event, for checking it by hand. */
+export interface TankReadings {
+  serialNumber: string;
+  capacity: number | null;
+  levels: Array<{ t: string; litres: number }>;
+  counter: Array<{ t: string; litres: number }>; // cumulative
+  engine: Array<{ t: string; hours: number }>; // cumulative operating hours
+  fixes: Array<{ t: string; latitude: number; longitude: number }>;
 }
 
 export interface TankMachineSummary {
@@ -226,6 +265,7 @@ export interface TankMachineSummary {
   cycleRefilledLitres: number;
   cycleMissingLitres: number;
   capacitySuspect: boolean;
+  calibration: TankCalibration;
 }
 
 /** Slips consistently a multiple of the tank rise: the capacity is likely wrong. */
@@ -261,6 +301,10 @@ export interface TankEvent {
   returnedLitres: number | null; // drain: part of the drop the reading got back
   since: string | null;
   dokBroj: number | null;
+  key: string; // stable id, for reviews
+  confidence: Confidence | null; // null: a refuel still waiting for Maris
+  reasons: EventReason[];
+  review: TankReview | null;
 }
 
 export interface TankOverview {
@@ -273,6 +317,8 @@ export interface TankOverview {
   marisGraceDays: number;
   machines: TankMachineSummary[];
   events: TankEvent[];
+  // All reviews so far of the machines shown, by kind.
+  reviewStats: Record<TankEventKind, { confirmed: number; falseAlarm: number }>;
 }
 
 export interface TankDetail {
@@ -303,6 +349,8 @@ export interface TankDetail {
   // The machine's last stored GPS fix up to the end of the range.
   location: { latitude: number | null; longitude: number | null; locationTime: string | null };
   marisGraceDays: number;
+  calibration: TankCalibration;
+  events: TankEvent[]; // this machine's findings, judged on its own data
 }
 
 export interface HealthResponse {

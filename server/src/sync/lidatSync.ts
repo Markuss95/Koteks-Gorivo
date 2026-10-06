@@ -119,8 +119,18 @@ export async function runLidatSync(): Promise<{
      WHERE excluded.reading_time > lidat_location.reading_time`,
   );
 
-  // Reduce a location time series to the latest fix per UTC day and upsert them.
-  const storeDailyLocations = (serial: string, readings: LidatLocationReading[], fetchedAt: string) => {
+  // Every fix, for placing fuel-control events exactly.
+  const upsertFix = db.prepare(
+    `INSERT INTO lidat_location_fix (serial_number, reading_time, latitude, longitude, fetched_at)
+     VALUES (@serial, @time, @lat, @lng, @fetchedAt)
+     ON CONFLICT(serial_number, reading_time) DO UPDATE SET
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       fetched_at = excluded.fetched_at`,
+  );
+
+  // Store every fix, and the latest per UTC day for the maps.
+  const storeLocations = (serial: string, readings: LidatLocationReading[], fetchedAt: string) => {
     const latestPerDay = new Map<string, LidatLocationReading>();
     for (const r of readings) {
       const day = r.dateTime.slice(0, 10);
@@ -128,6 +138,9 @@ export async function runLidatSync(): Promise<{
       if (!prev || r.dateTime > prev.dateTime) latestPerDay.set(day, r);
     }
     const tx = db.transaction(() => {
+      for (const r of readings) {
+        upsertFix.run({ serial, time: r.dateTime, lat: r.latitude, lng: r.longitude, fetchedAt });
+      }
       for (const [day, r] of latestPerDay) {
         upsertLocation.run({
           serial,
@@ -229,6 +242,13 @@ export async function runLidatSync(): Promise<{
         // Current snapshot position → today's location row (so the map works
         // even before the per-machine history backfill below has run).
         if (eq.latitude !== undefined && eq.longitude !== undefined && eq.locationTime) {
+          upsertFix.run({
+            serial: eq.serialNumber,
+            time: eq.locationTime,
+            lat: eq.latitude,
+            lng: eq.longitude,
+            fetchedAt,
+          });
           upsertLocation.run({
             serial: eq.serialNumber,
             day: eq.locationTime.slice(0, 10),
@@ -441,7 +461,7 @@ export async function runLidatSync(): Promise<{
           locationWindow.startUtc,
           endUtc,
         );
-        storeDailyLocations(m.serial_number, locs, fetchedAt);
+        storeLocations(m.serial_number, locs, fetchedAt);
         markRead(m.serial_number, 'location', locationWindow.full);
       } catch (err) {
         errors.push(`${m.serial_number} (location): ${err instanceof Error ? err.message : String(err)}`);

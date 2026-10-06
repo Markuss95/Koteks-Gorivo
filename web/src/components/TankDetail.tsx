@@ -11,10 +11,11 @@ import {
   YAxis,
 } from 'recharts';
 import { api } from '../api';
-import type { SensorQuality, SlipStatus, TankDetail as TankDetailData, TankDrain } from '../types';
+import type { SensorQuality, SlipStatus, TankDetail as TankDetailData, TankDrain, TankEvent } from '../types';
 import { fmt, fmtDate, fmtDateTime, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
+import { CalibrationLine, ConfidenceBadge, EventEvidence, ReviewBadge } from './TankEvidence';
 
 // Same floor as the other detail drawers.
 const DATE_FLOOR = '2026-06-04';
@@ -36,23 +37,30 @@ const SENSOR_NOTE: Record<SensorQuality, string | null> = {
   none: 'Za ovaj stroj nema podataka o razini goriva.',
 };
 
-/** Drawer: tank level over time with refuels and drains, and each Maris slip checked. */
+/**
+ * Drawer: tank level over time with refuels and drains, and each Maris slip
+ * checked. Opened on an event (`focus`), it starts with the evidence for it.
+ */
 export function TankDetail({
   serial,
   model,
   from,
   to,
   isAdmin,
+  focus,
   onClose,
   onCapacityChanged,
+  onReviewed,
 }: {
   serial: string;
   model: string;
   from: string;
   to: string;
   isAdmin: boolean;
+  focus?: TankEvent | null;
   onClose: () => void;
   onCapacityChanged: () => void;
+  onReviewed?: () => void;
 }) {
   // Seeded from the page range, adjustable here independently.
   const [rFrom, setRFrom] = useState(from);
@@ -63,6 +71,10 @@ export function TankDetail({
   const [selectedDrain, setSelectedDrain] = useState<TankDrain | null>(null);
   // Bumped after a capacity correction to reload with the new litres.
   const [reload, setReload] = useState(0);
+  // Bumped after a review: fetch again without hiding what's on screen.
+  const [refresh, setRefresh] = useState(0);
+  // The event whose evidence is open: the one the drawer was opened on, or a drain picked below.
+  const [focusKey, setFocusKey] = useState<string | null>(focus?.key ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +94,31 @@ export function TankDetail({
       cancelled = true;
     };
   }, [serial, rFrom, rTo, reload]);
+
+  useEffect(() => {
+    if (refresh === 0) return;
+    let cancelled = false;
+    api
+      .tankDetail(serial, rFrom, rTo)
+      .then((d) => !cancelled && setData(d))
+      .catch((e) => !cancelled && setError(e.message));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh]);
+
+  useEffect(() => setFocusKey(focus?.key ?? null), [focus?.key]);
+
+  // The page's copy of the event also points at other machines (a slip booked on
+  // the wrong one); the drawer's own copy has the latest review.
+  const focusEvent = useMemo<TankEvent | null>(() => {
+    if (!focusKey) return null;
+    const own = data?.events.find((e) => e.key === focusKey);
+    if (focus && focus.key === focusKey) return { ...focus, review: own ? own.review : focus.review };
+    return own ?? null;
+  }, [focusKey, focus, data]);
+  const drainEvent = (d: TankDrain) => data?.events.find((e) => e.kind === 'drain' && e.time === d.time);
 
   const series = useMemo(
     () => (data?.levelSeries ?? []).map((p) => ({ t: Date.parse(p.t), litres: p.litres })),
@@ -170,6 +207,19 @@ export function TankDetail({
               </div>
             )}
 
+            {focusEvent && (
+              <EventEvidence
+                event={focusEvent}
+                detail={data}
+                graceDays={data.marisGraceDays}
+                onClose={() => setFocusKey(null)}
+                onReviewed={() => {
+                  setRefresh((n) => n + 1);
+                  onReviewed?.();
+                }}
+              />
+            )}
+
             <div style={{ marginBottom: 8 }}>
               <span className="muted">Zadnje LiDAT očitanje:</span>{' '}
               <strong className={isStale(data.lastLidatTime) ? 'neg' : ''}>
@@ -188,6 +238,7 @@ export function TankDetail({
                 onCapacityChanged();
               }}
             />
+            <CalibrationLine calibration={data.calibration} />
 
             {SENSOR_NOTE[data.sensor] && (
               <div className="muted" style={{ marginBottom: 12 }}>
@@ -422,8 +473,8 @@ export function TankDetail({
                 <div className="muted" style={{ marginBottom: 12 }}>
                   Razina je naglo pala barem 15 L više nego što je motor u istom razdoblju mogao
                   potrošiti i tako ostala. Dio pada koji se ubrzo vratio (ili je prije toga bez
-                  izdatnice porastao) je kolebanje očitanja, ne gorivo. Kliknite redak za lokaciju stroja
-                  taj dan.
+                  izdatnice porastao) je kolebanje očitanja, ne gorivo. Kliknite redak za dokaze i
+                  lokaciju stroja.
                 </div>
                 <table>
                   <thead>
@@ -433,6 +484,8 @@ export function TankDetail({
                       <th className="num">Motor potrošio (L)</th>
                       {drainsWavered && <th className="num">Kolebanje očitanja (L)</th>}
                       <th className="num">Bez potrošnje (L)</th>
+                      <th>Pouzdanost</th>
+                      <th>Provjera</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -440,7 +493,12 @@ export function TankDetail({
                       <tr
                         key={d.time}
                         className={`clickable${selectedDrain?.time === d.time ? ' selected-row' : ''}`}
-                        onClick={() => setSelectedDrain(d)}
+                        onClick={() => {
+                          setSelectedDrain(d);
+                          const e = drainEvent(d);
+                          if (e) setFocusKey(e.key);
+                        }}
+                        title="Prikaži dokaze za ovaj odljev"
                       >
                         <td>{fmtDateTime(d.time)}</td>
                         <td className="num">
@@ -451,11 +509,15 @@ export function TankDetail({
                           <td className="num muted">{d.returnedLitres >= 1 ? fmt(d.returnedLitres, 0) : '—'}</td>
                         )}
                         <td className="num neg">{fmt(d.litres, 0)}</td>
+                        <td>{drainEvent(d) ? <ConfidenceBadge event={drainEvent(d)!} /> : '—'}</td>
+                        <td>
+                          <ReviewBadge review={drainEvent(d)?.review ?? null} />
+                        </td>
                       </tr>
                     ))}
                     {data.drains.length === 0 && (
                       <tr>
-                        <td colSpan={drainsWavered ? 5 : 4} className="muted" style={{ textAlign: 'center', padding: 20 }}>
+                        <td colSpan={drainsWavered ? 7 : 6} className="muted" style={{ textAlign: 'center', padding: 20 }}>
                           Nema odljeva u razdoblju.
                         </td>
                       </tr>

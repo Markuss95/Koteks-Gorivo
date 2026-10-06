@@ -5,7 +5,8 @@ import { config } from './config.js';
 import { listMachines, listMachinePositions, machineGroupsMap } from './services/machines.js';
 import { buildComparison, getFuelArticleCodes, lidatConsumption } from './services/comparison.js';
 import { buildUtilization, buildMachineSeries } from './services/utilization.js';
-import { buildTankOverview, buildTankDetail, setTankCapacityOverride } from './services/tank.js';
+import { buildTankOverview, buildTankDetail, buildTankReadings, setTankCapacityOverride } from './services/tank.js';
+import { saveReview } from './services/tankReviews.js';
 import { marisFetchItems, toMarisDate } from './maris/client.js';
 import { marisHealth } from './maris/client.js';
 import { lidatHealth } from './lidat/client.js';
@@ -305,6 +306,62 @@ api.get('/tank/:serial', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// The raw readings behind one event (tank level, fuel counter, engine hours, GPS),
+// for checking it by hand. A few days at most.
+const readingsSchema = z.object({
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+});
+
+api.get('/tank/:serial/readings', (req, res) => {
+  const parse = readingsSchema.safeParse(req.query);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  if (!canAccessSerial(req as AuthedRequest, req.params.serial)) {
+    res.status(404).json({ error: 'Machine not found' });
+    return;
+  }
+  const readings = buildTankReadings(req.params.serial, parse.data.from, parse.data.to);
+  if (!readings) {
+    res.status(404).json({ error: 'Machine not found' });
+    return;
+  }
+  res.json(readings);
+});
+
+// What someone found when checking an event on site (any user who can see the
+// machine); a null verdict withdraws it.
+const reviewSchema = z.object({
+  key: z.string().min(1).max(200),
+  serialNumber: z.string().min(1),
+  kind: z.enum(['drain', 'cycle_loss', 'slip_mismatch', 'slip_no_refuel', 'refuel_no_slip', 'refuel_awaiting_slip']),
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  verdict: z.enum(['confirmed', 'false_alarm']).nullable(),
+  note: z.string().max(1000).default(''),
+});
+
+api.put('/tank/review', (req, res) => {
+  const parse = reviewSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.flatten() });
+    return;
+  }
+  const { user } = req as AuthedRequest;
+  if (!user || !canAccessSerial(req as AuthedRequest, parse.data.serialNumber)) {
+    res.status(404).json({ error: 'Machine not found' });
+    return;
+  }
+  // The key names its machine first; it must be the one checked for access.
+  if (!parse.data.key.startsWith(`${parse.data.serialNumber}|`)) {
+    res.status(400).json({ error: 'Key does not belong to that machine' });
+    return;
+  }
+  saveReview({ ...parse.data, userId: user.id, username: user.username });
+  res.json({ ok: true });
 });
 
 // Correct a tank size LiDAT reports wrongly (null clears the correction). Every

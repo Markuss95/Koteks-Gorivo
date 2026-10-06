@@ -19,6 +19,7 @@ import { marisFetchItems, toMarisDate } from '../maris/client.js';
 import { getFuelArticleCodes } from './comparison.js';
 import { listMachines, type Machine } from './machines.js';
 import type { MachineGroup } from './groups.js';
+import { reviewStats, reviewsOf } from './tankReviews.js';
 
 // Readings on each side of a candidate step whose medians must differ. Requiring
 // the change to persist rejects single-reading spikes from a machine standing on
@@ -128,6 +129,51 @@ const FULL_FRACTION = 0.95;
 const CYCLE_MIN_LITRES = 30;
 const CYCLE_MIN_FRACTION = 0.25;
 
+// Each machine is checked against what is metered, over the CALIBRATION_DAYS up
+// to the end of the selected range (whatever its length):
+//  - Maris: the tank rise against the booked quantity on single fills. Agreeing
+//    within MARIS_AGREE says the tank size, and so every litre read off the
+//    sensor, is right.
+//  - Counter: from one rest to the next (the first readings after the machine
+//    stood still, when the level has settled — the sensor lags while it works),
+//    with no fill or flagged drop in between, the level falls by what the fuel
+//    counter burned. Agreeing within COUNTER_AGREE (plus what the sensor's
+//    resolution and parking spots allow) says the two can be compared, which
+//    every fill-to-fill balance, and every drop while the engine ran, relies on.
+const CALIBRATION_DAYS = 30;
+const MARIS_CHECK_MIN_SLIPS = 3;
+const MARIS_AGREE = 0.15;
+const COUNTER_CHECK_MIN_LITRES = 100;
+const COUNTER_AGREE = 0.15;
+// No reading for this long and the machine stood still; its next readings are a rest point.
+const REST_GAP_HOURS = 3;
+// A rest point's level: the median of its first readings within this many minutes.
+const REST_READING_MINUTES = 15;
+// Rest to rest the machine must have burned at least this much to count.
+const REST_MIN_BURN_LITRES = 5;
+// What one rest point's level can be off by (parking on uneven ground), at least.
+const REST_READ_ERROR_LITRES = 5;
+
+// A finding is "sure" only when every check behind it holds; otherwise it is
+// shown as "to check", with what to look at.
+const SURE_MARGIN = 1.5; // the amount must clear its threshold by this factor
+const SURE_MAX_RETURNED_SHARE = 0.25; // of a drop, at most this much may have come back
+// A drop across a longer silence is said to have happened somewhere in it.
+const LONG_SILENCE_HOURS = 24;
+// The counter barely moving across a drop (this much, or this share of it) means
+// the engine burned nothing worth counting, however accurate the counter is.
+const IDLE_BURN_LITRES = 2;
+const IDLE_BURN_SHARE = 0.1;
+// GPS fixes this close to a drop's readings show where it happened; a machine
+// that moved less than MOVED_METRES between them stood still.
+const FIX_NEAR_HOURS = 3;
+const MOVED_METRES = 100;
+// The first reading after a silence comes as the engine starts, so a few minutes
+// of running between the readings still means it stood still while fuel left.
+const ENGINE_OFF_HOURS = 0.1;
+// The raw readings behind one event are served for at most this long a window.
+const READINGS_MAX_DAYS = 5;
+
 // Extra days of readings (and Maris slips) around the range, so an event early on
 // the first day still has context (a weekend or a short holiday), a fill-to-fill
 // cycle ending in the range can start before it, and a drop near either end is
@@ -170,10 +216,14 @@ export interface TankDrain {
   returnedLitres: number; // part of the drop the reading got back soon after (or had gained just before)
   levelBefore: number;
   levelAfter: number;
-  // Where the machine was that day (its stored daily GPS fix), if known.
+  minLitres: number; // the threshold it had to clear
+  engineHours: number | null; // engine running time between the readings either side
+  // Where the machine stood when it happened (its GPS fix nearest the drop, or
+  // that day's), and how far it moved between the fixes before and after.
   latitude: number | null;
   longitude: number | null;
   locationTime: string | null;
+  movedMetres: number | null;
 }
 
 /** From one fill to a full tank to the next. */
@@ -206,6 +256,31 @@ export interface TankSlipCheck {
   // and against this many fills (two for one slip covering a fill in two goes).
   sharedWith: number[];
   fills: number;
+  sensorThatDay: boolean; // the tank sensor reported on the slip's date
+}
+
+export type CheckStatus = 'ok' | 'off' | 'unknown';
+
+/** The machine against what is metered (see CALIBRATION_DAYS). */
+export interface TankCalibration {
+  maris: { status: CheckStatus; ratio: number | null; slips: number }; // tank rise ÷ booked
+  counter: { status: CheckStatus; ratio: number | null; burnedLitres: number }; // level drop ÷ burned, working
+}
+
+export interface EventReason {
+  ok: boolean; // false: something to check before acting on the event
+  text: string;
+}
+
+export type Confidence = 'sure' | 'check';
+
+export type ReviewVerdict = 'confirmed' | 'false_alarm';
+
+export interface TankReview {
+  verdict: ReviewVerdict;
+  note: string;
+  username: string;
+  updatedAt: string;
 }
 
 export interface TankMachineAnalysis {
@@ -228,6 +303,7 @@ export interface TankMachineAnalysis {
   refuelsAwaitingSlip: TankRefuel[]; // no izdatnica yet, still inside the grace period
   // Slips consistently a multiple of the tank rise: the capacity is likely wrong.
   capacityHint: CapacityHint | null;
+  calibration: TankCalibration;
 }
 
 export interface CapacityHint {
@@ -262,6 +338,7 @@ export interface TankMachineSummary {
   cycleRefilledLitres: number;
   cycleMissingLitres: number;
   capacitySuspect: boolean;
+  calibration: TankCalibration;
 }
 
 export type TankEventKind =
@@ -289,6 +366,10 @@ export interface TankEvent {
   returnedLitres: number | null; // drain: part of the drop the reading got back
   since: string | null; // cycle_loss: the fill that opened the cycle
   dokBroj: number | null;
+  key: string; // stable id, for reviews
+  confidence: Confidence | null; // null for refuels still waiting for Maris (not a finding)
+  reasons: EventReason[];
+  review: TankReview | null;
 }
 
 export interface TankOverview {
@@ -301,6 +382,8 @@ export interface TankOverview {
   marisGraceDays: number;
   machines: TankMachineSummary[];
   events: TankEvent[];
+  // All reviews so far of the machines shown, by kind: how often each kind held up.
+  reviewStats: Record<TankEventKind, { confirmed: number; falseAlarm: number }>;
 }
 
 export interface TankDetail extends TankMachineAnalysis {
@@ -315,6 +398,17 @@ export interface TankDetail extends TankMachineAnalysis {
   // that day (today's comes from the fleet snapshot).
   location: Pick<TankDrain, 'latitude' | 'longitude' | 'locationTime'>;
   marisGraceDays: number;
+  events: TankEvent[]; // this machine's findings, judged on its own data
+}
+
+/** The raw readings behind an event, for checking it by hand. */
+export interface TankReadings {
+  serialNumber: string;
+  capacity: number | null;
+  levels: Array<{ t: string; litres: number }>;
+  counter: Array<{ t: string; litres: number }>; // cumulative, as the counter reports it
+  engine: Array<{ t: string; hours: number }>; // cumulative operating hours
+  fixes: Array<{ t: string; latitude: number; longitude: number }>;
 }
 
 export interface LevelPoint {
@@ -408,6 +502,18 @@ function loadFuel(serial: string, fromIso: string, toIso: string): FuelPoint[] {
     )
     .all(serial, fromIso, toIso) as Array<{ reading_time: string; fuel_consumed_cum: number }>;
   return rows.map((r) => ({ ms: Date.parse(r.reading_time), cum: r.fuel_consumed_cum }));
+}
+
+/** Cumulative engine operating hours, in the same shape as the fuel counter. */
+function loadHours(serial: string, fromIso: string, toIso: string): FuelPoint[] {
+  const rows = db
+    .prepare(
+      `SELECT reading_time, hours_cum FROM lidat_hours_reading
+       WHERE serial_number = ? AND metric = 'operating' AND reading_time >= ? AND reading_time <= ?
+       ORDER BY reading_time`,
+    )
+    .all(serial, fromIso, toIso) as Array<{ reading_time: string; hours_cum: number }>;
+  return rows.map((r) => ({ ms: Date.parse(r.reading_time), cum: r.hours_cum }));
 }
 
 /** Resolution of a machine's tank sensor, judged on its recent readings. */
@@ -676,10 +782,15 @@ function detectDrains(
   for (const c of candidates) {
     for (const r of rises) if (r.from >= ms[c.s.start - 1] && r.from < c.heldUntil) r.used = true;
   }
+  // Smaller drops (below the threshold, never reported) are paired too, so a rise
+  // that belongs with one of them can't cancel some other drop further away.
+  const small: Candidate[] = findSteps(unexplained, ms, Math.max(PAIR_MIN_LITRES, DRAIN_MIN_SENSOR_STEPS * stepLitres), usable)
+    .filter((s) => !candidates.some((c) => s.start <= c.s.end && s.end >= c.s.start))
+    .map((s) => ({ s, drop: s.after - s.before, seen: s.after - s.before, heldUntil: ms[s.end] }));
   // Every drop and rise that could be a pair, nearest in time first: a rise goes
   // to the drop it's closest to, each at most once.
   const options: Array<{ c: Candidate; r: (typeof rises)[number]; gap: number; fit: number }> = [];
-  for (const c of candidates) {
+  for (const c of [...candidates, ...small]) {
     const start = ms[c.s.start - 1];
     const end = c.heldUntil;
     for (const r of rises) {
@@ -719,9 +830,12 @@ function detectDrains(
       returnedLitres: round1(c.seen - litres),
       levelBefore: round1(median(before.map((i) => levels[i].litres))),
       levelAfter: round1(median(after.map((i) => levels[i].litres))),
+      minLitres: round1(threshold),
+      engineHours: null,
       latitude: null,
       longitude: null,
       locationTime: null,
+      movedMetres: null,
     });
   }
   return { drains, phantomFills, settled };
@@ -790,6 +904,74 @@ function locateAt(
   return row
     ? { latitude: row.latitude, longitude: row.longitude, locationTime: row.reading_time }
     : { latitude: null, longitude: null, locationTime: null };
+}
+
+interface Fix {
+  latitude: number;
+  longitude: number;
+  reading_time: string;
+}
+
+function metresBetween(a: Fix, b: Fix): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.latitude - a.latitude) * rad;
+  const dLon = (b.longitude - a.longitude) * rad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
+function fixBefore(serial: string, iso: string): Fix | undefined {
+  return db
+    .prepare(
+      `SELECT latitude, longitude, reading_time FROM lidat_location_fix
+       WHERE serial_number = ? AND reading_time <= ? ORDER BY reading_time DESC LIMIT 1`,
+    )
+    .get(serial, iso) as Fix | undefined;
+}
+
+function fixAfter(serial: string, iso: string): Fix | undefined {
+  return db
+    .prepare(
+      `SELECT latitude, longitude, reading_time FROM lidat_location_fix
+       WHERE serial_number = ? AND reading_time >= ? ORDER BY reading_time LIMIT 1`,
+    )
+    .get(serial, iso) as Fix | undefined;
+}
+
+/**
+ * Where the machine stood when fuel left: its last GPS fix before the drop (or
+ * the first after, if none is close before), and how far it moved between the
+ * two. History from before every fix was kept falls back to the day's position.
+ */
+function locateDrop(
+  serial: string,
+  prevTime: string,
+  time: string,
+): Pick<TankDrain, 'latitude' | 'longitude' | 'locationTime' | 'movedMetres'> {
+  const near = (f: Fix | undefined, iso: string) =>
+    f && Math.abs(Date.parse(f.reading_time) - Date.parse(iso)) <= FIX_NEAR_HOURS * HOUR_MS ? f : undefined;
+  const before = near(fixBefore(serial, prevTime), prevTime);
+  const after = near(fixAfter(serial, time), time);
+  const at = before ?? after;
+  if (!at) return { ...locateAt(serial, time), movedMetres: null };
+  return {
+    latitude: at.latitude,
+    longitude: at.longitude,
+    locationTime: at.reading_time,
+    movedMetres: before && after ? Math.round(metresBetween(before, after)) : null,
+  };
+}
+
+/** The machine's last known position up to the end of `day`: its latest fix, or that day's position. */
+function positionUpTo(serial: string, day: string): Pick<TankDrain, 'latitude' | 'longitude' | 'locationTime'> {
+  const fix = fixBefore(serial, `${day}T23:59:59Z`);
+  const daily = locateAt(serial, day);
+  if (fix && (!daily.locationTime || fix.reading_time >= daily.locationTime)) {
+    return { latitude: fix.latitude, longitude: fix.longitude, locationTime: fix.reading_time };
+  }
+  return daily;
 }
 
 function slipTolerance(litres: number, stepLitres: number): number {
@@ -974,6 +1156,7 @@ function checkSlips(
         status: 'ok',
         sharedWith: g.slips.filter((x) => x !== s).map((x) => x.dokBroj),
         fills: fills.length,
+        sensorThatDay: levelDays.has(s.date),
       };
     }
     const f = pairOf.get(s) ?? targeted.get(s);
@@ -987,6 +1170,7 @@ function checkSlips(
         status: j.ok ? 'ok' : 'mismatch',
         sharedWith: [],
         fills: 1,
+        sensorThatDay: levelDays.has(s.date),
       };
     }
     // No rise found: only a finding if the sensor was reporting around the slip,
@@ -1006,6 +1190,7 @@ function checkSlips(
       status: !seen ? 'no_data' : visible ? 'no_refuel' : 'too_small',
       sharedWith: [],
       fills: 0,
+      sensorThatDay: levelDays.has(s.date),
     };
   });
 
@@ -1160,6 +1345,74 @@ function firstLevelSince(floor: string | null, serial?: string): string | null {
   return row.t ?? null;
 }
 
+/** See CALIBRATION_DAYS: the sensor against Maris slips and against the counter. */
+function calibrate(
+  levels: LevelPoint[],
+  burn: BurnIndex,
+  fills: TankRefuel[],
+  drains: TankDrain[],
+  checks: TankSlipCheck[],
+  stepLitres: number,
+): TankCalibration {
+  // Maris: single fills big enough to give a steady ratio.
+  const ratios = checks
+    .filter(
+      (c) =>
+        (c.status === 'ok' || c.status === 'mismatch') &&
+        c.fills === 1 &&
+        c.sharedWith.length === 0 &&
+        c.tankLitres !== null &&
+        c.tankLitres >= CAPACITY_HINT_MIN_RISE_LITRES,
+    )
+    .map((c) => c.tankLitres! / c.marisLitres);
+  let maris: TankCalibration['maris'] = { status: 'unknown', ratio: null, slips: ratios.length };
+  if (ratios.length >= MARIS_CHECK_MIN_SLIPS) {
+    const ratio = median(ratios);
+    const agreeing = ratios.filter((r) => Math.abs(r / ratio - 1) <= CAPACITY_HINT_AGREE).length;
+    // Ratios all over the place say the sensor is too rough to tell, not that it's off.
+    const steady = agreeing >= CAPACITY_HINT_AGREEING_SHARE * ratios.length;
+    maris = {
+      status: !steady ? 'unknown' : Math.abs(ratio - 1) <= MARIS_AGREE ? 'ok' : 'off',
+      ratio: Math.round(ratio * 100) / 100,
+      slips: ratios.length,
+    };
+  }
+
+  // Counter: rest to rest.
+  const rests: Array<{ ms: number; litres: number }> = [];
+  for (let i = 1; i < levels.length; i++) {
+    if (levels[i].ms - levels[i - 1].ms < REST_GAP_HOURS * HOUR_MS || !burn.bounds(levels[i].ms)) continue;
+    const first = levels.slice(i, i + K).filter((p) => p.ms - levels[i].ms <= REST_READING_MINUTES * 60_000);
+    rests.push({ ms: levels[i].ms, litres: median(first.map((p) => p.litres)) });
+  }
+  const between = (t: string, a: number, b: number) => Date.parse(t) > a && Date.parse(t) <= b;
+  let fell = 0;
+  let burned = 0;
+  let pairs = 0;
+  for (let k = 1; k < rests.length; k++) {
+    const [a, b] = [rests[k - 1], rests[k]];
+    if (fills.some((f) => between(f.time, a.ms, b.ms)) || drains.some((d) => between(d.time, a.ms, b.ms))) continue;
+    if (burn.unknownBetween(a.ms, b.ms)) continue;
+    const used = (burn.at(b.ms) ?? 0) - (burn.at(a.ms) ?? 0);
+    if (used < REST_MIN_BURN_LITRES) continue;
+    fell += a.litres - b.litres;
+    burned += used;
+    pairs++;
+  }
+  let counter: TankCalibration['counter'] = { status: 'unknown', ratio: null, burnedLitres: round1(burned) };
+  if (burned >= COUNTER_CHECK_MIN_LITRES) {
+    const ratio = fell / burned;
+    const resolution = (Math.max(stepLitres, REST_READ_ERROR_LITRES) * Math.sqrt(2 * pairs)) / burned;
+    counter = {
+      status:
+        resolution > COUNTER_AGREE ? 'unknown' : Math.abs(ratio - 1) <= COUNTER_AGREE + resolution ? 'ok' : 'off',
+      ratio: Math.round(ratio * 100) / 100,
+      burnedLitres: round1(burned),
+    };
+  }
+  return { maris, counter };
+}
+
 /**
  * The analysis proper, on readings already loaded (no database or Maris), over
  * everything passed in; the caller narrows the results to its range.
@@ -1167,6 +1420,7 @@ function firstLevelSince(floor: string | null, serial?: string): string | null {
 export function analyseReadings(input: {
   levels: LevelPoint[];
   fuel: FuelPoint[];
+  hours?: FuelPoint[]; // cumulative engine operating hours
   slips: SlipInput[];
   capacity: number | null;
   quality: SensorQuality;
@@ -1177,9 +1431,11 @@ export function analyseReadings(input: {
   cycles: TankCycle[];
   checks: TankSlipCheck[];
   unmatched: TankRefuel[];
+  calibration: TankCalibration;
 } {
   const { levels, capacity, quality, stepLitres } = input;
   const burn = burnIndex(input.fuel);
+  const engine = burnIndex(input.hours ?? []);
   const fills = capacity ? detectRefuels(levels, capacity, stepLitres) : [];
   const slip = checkSlips(input.slips, fills, levels, capacity ?? 0, stepLitres);
   const { drains, phantomFills, settled } =
@@ -1200,13 +1456,27 @@ export function analyseReadings(input: {
     slip.marisByRefuel.set(c.refuelTime!, c.marisLitres);
   }
   const cycles = capacity ? refillCycles(refuels, burn, capacity, slip.marisByRefuel, drains) : [];
+  // How long the engine ran while each drop happened (0: it stood still).
+  for (const d of drains) {
+    const a = engine.bounds(Date.parse(d.prevTime));
+    const b = engine.bounds(Date.parse(d.time));
+    d.engineHours = a && b ? Math.round(Math.max(0, b.hi - a.lo) * 100) / 100 : null;
+  }
   return {
     refuels,
     drains,
     cycles,
     checks: slip.checks,
     unmatched: slip.unmatched.filter((r) => !phantomFills.has(r.time)),
+    calibration: calibrate(levels, burn, refuels, drains, slip.checks, stepLitres),
   };
+}
+
+/** First day loaded for a range: its padding, or the calibration lookback if that reaches further back. */
+function loadStartDay(from: string, to: string): string {
+  const padded = shiftDay(from, -PAD_BEFORE_DAYS);
+  const lookback = shiftDay(to, -CALIBRATION_DAYS);
+  return padded < lookback ? padded : lookback;
 }
 
 function analyseMachine(
@@ -1221,7 +1491,7 @@ function analyseMachine(
   const inRange = (day: string) => day >= from && day <= to;
   const corrected = overrides[m.serialNumber];
   const capacity = corrected ?? m.fuelTankCapacity;
-  const loadFrom = isoAt(Date.parse(`${from}T00:00:00Z`) - PAD_BEFORE_DAYS * DAY_MS);
+  const loadFrom = `${loadStartDay(from, to)}T00:00:00Z`;
   const loadTo = isoAt(Date.parse(`${to}T23:59:59Z`) + PAD_AFTER_DAYS * DAY_MS);
 
   // Without a capacity the percentages can't be turned into litres.
@@ -1231,9 +1501,10 @@ function analyseMachine(
   const levels = capacity ? loadLevels(m.serialNumber, loadFrom, loadTo, capacity) : [];
   const stepLitres = stepPct !== null && capacity ? (stepPct / 100) * capacity : 0;
 
-  const { refuels, drains, cycles, checks, unmatched } = analyseReadings({
+  const { refuels, drains, cycles, checks, unmatched, calibration } = analyseReadings({
     levels,
     fuel: loadFuel(m.serialNumber, loadFrom, loadTo),
+    hours: loadHours(m.serialNumber, loadFrom, loadTo),
     slips,
     capacity,
     quality,
@@ -1257,7 +1528,7 @@ function analyseMachine(
     refuels: refuels.filter((r) => inRange(localDay(r.time))),
     drains: drains
       .filter((d) => inRange(localDay(d.time)))
-      .map((d) => ({ ...d, ...locateAt(m.serialNumber, d.time) })),
+      .map((d) => ({ ...d, ...locateDrop(m.serialNumber, d.prevTime, d.time) })),
     cycles: cycles.filter((c) => inRange(localDay(c.end))),
     slips: checks.filter((c) => inRange(c.date)),
     // Without Maris every refuel would look slip-less — say nothing instead.
@@ -1273,6 +1544,7 @@ function analyseMachine(
       checks.filter((c) => inRange(c.date)),
       capacity,
     ),
+    calibration,
   };
   return { analysis, levels: levels.filter((p) => inRange(localDay(p.time))) };
 }
@@ -1305,7 +1577,195 @@ function summarise(a: TankMachineAnalysis): TankMachineSummary {
     cycleRefilledLitres: sum(a.cycles, (c) => c.refilledLitres),
     cycleMissingLitres: sum(a.cycles, (c) => c.missingLitres),
     capacitySuspect: a.capacityHint !== null,
+    calibration: a.calibration,
   };
+}
+
+// ---- why each finding is (or isn't) sure ----
+
+const litresText = (n: number) => `${Math.round(n)} L`;
+const ratioText = (r: number | null) => (r === null ? '—' : r.toFixed(2).replace('.', ','));
+const hoursText = (h: number) => `${h.toFixed(1).replace('.', ',')} h`;
+const gapText = (h: number) => (h < 72 ? `${Math.round(h)} h` : `${Math.round(h / 24)} dana`);
+const distanceText = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`);
+const okReason = (text: string): EventReason => ({ ok: true, text });
+const checkReason = (text: string): EventReason => ({ ok: false, text });
+
+/** Smallest rise this machine's sensor shows as a refuel. */
+function refuelThreshold(a: TankMachineAnalysis): number {
+  return Math.max(
+    REFUEL_MIN_LITRES,
+    REFUEL_MIN_FRACTION * (a.tankCapacity ?? 0),
+    REFUEL_MIN_SENSOR_STEPS * (a.sensorStepLitres ?? 0),
+  );
+}
+
+/** Whether the sensor and the counter can be compared — what drains and cycles rest on. */
+function counterReason(cal: TankCalibration): EventReason {
+  const c = cal.counter;
+  if (c.status === 'ok') {
+    return okReason(`Senzor razine i brojač potrošnje se slažu dok stroj radi (omjer ${ratioText(c.ratio)})`);
+  }
+  if (c.status === 'off') {
+    return checkReason(
+      `Senzor razine i brojač potrošnje se ne slažu dok stroj radi (omjer ${ratioText(c.ratio)}) — provjerite kapacitet spremnika i brojač`,
+    );
+  }
+  return checkReason('Premalo rada u zadnjih 30 dana da bi se senzor razine usporedio s brojačem potrošnje');
+}
+
+/** Whether the litres read off the sensor are confirmed — what slip checks rest on. */
+function scaleReason(cal: TankCalibration): EventReason {
+  if (cal.maris.status === 'ok') {
+    return okReason(
+      `Izdatnice ovog stroja slažu se sa senzorom (${cal.maris.slips} izdatnica, omjer ${ratioText(cal.maris.ratio)})`,
+    );
+  }
+  if (cal.maris.status === 'off') {
+    return checkReason(
+      `Izdatnice ovog stroja redom odstupaju od senzora (omjer ${ratioText(cal.maris.ratio)}) — vjerojatno je kapacitet spremnika krivo zadan`,
+    );
+  }
+  if (cal.counter.status === 'ok') {
+    return okReason(`Senzor razine slaže se s brojačem potrošnje (omjer ${ratioText(cal.counter.ratio)})`);
+  }
+  if (cal.counter.status === 'off') {
+    return checkReason(
+      `Senzor razine i brojač potrošnje se ne slažu (omjer ${ratioText(cal.counter.ratio)}) — provjerite kapacitet spremnika`,
+    );
+  }
+  return checkReason('Litre sa senzora još nisu potvrđene (premalo izdatnica i rada za usporedbu)');
+}
+
+/**
+ * The sensor's litres contradicted by Maris (or, without Maris, by the counter —
+ * unless the counter's verdict is already among the reasons): capacity likely wrong.
+ */
+function scaleContradiction(cal: TankCalibration, counterShown: boolean): EventReason | null {
+  if (cal.maris.status === 'off') {
+    return checkReason(
+      `Izdatnice ovog stroja redom odstupaju od senzora (omjer ${ratioText(cal.maris.ratio)}) — vjerojatno je kapacitet spremnika krivo zadan, pa i litre`,
+    );
+  }
+  if (!counterShown && cal.maris.status !== 'ok' && cal.counter.status === 'off') {
+    return checkReason(
+      `Senzor razine i brojač potrošnje se ne slažu (omjer ${ratioText(cal.counter.ratio)}) — provjerite kapacitet spremnika i brojač`,
+    );
+  }
+  return null;
+}
+
+function drainReasons(d: TankDrain, cal: TankCalibration): EventReason[] {
+  const out: EventReason[] = [];
+  // Fuel gone while the counter stood still wasn't burned, whatever the counter's
+  // accuracy; a drop while the engine ran rests on sensor and counter agreeing.
+  const idle = d.burnedLitres <= Math.max(IDLE_BURN_LITRES, IDLE_BURN_SHARE * d.litres);
+  if (idle) {
+    out.push(
+      d.engineHours !== null && d.engineHours <= ENGINE_OFF_HOURS
+        ? okReason('Motor nije radio dok je gorivo nestalo (brojač potrošnje se nije micao)')
+        : okReason(`Brojač potrošnje za to vrijeme pokazuje samo ${litresText(d.burnedLitres)}`),
+    );
+  } else {
+    out.push(counterReason(cal));
+    out.push(
+      okReason(
+        d.engineHours !== null
+          ? `Motor je u tom razdoblju radio ${hoursText(d.engineHours)} i potrošio ${litresText(d.burnedLitres)}`
+          : `Motor je u tom razdoblju potrošio ${litresText(d.burnedLitres)}`,
+      ),
+    );
+  }
+  const scale = scaleContradiction(cal, !idle);
+  if (scale) out.push(scale);
+  out.push(
+    d.litres >= SURE_MARGIN * d.minLitres
+      ? okReason(`Nestalo ${litresText(d.litres)}, prag ${litresText(d.minLitres)}`)
+      : checkReason(`Blizu praga: nestalo ${litresText(d.litres)} uz prag ${litresText(d.minLitres)}`),
+  );
+  if (d.returnedLitres >= 1) {
+    const seen = d.litres + d.returnedLitres;
+    out.push(
+      d.returnedLitres <= SURE_MAX_RETURNED_SHARE * seen
+        ? okReason(`Od pada od ${litresText(seen)} vratilo se ${litresText(d.returnedLitres)}, to se ne računa`)
+        : checkReason(
+            `Velik dio pada se vratio (${litresText(d.returnedLitres)} od ${litresText(seen)}) — moguće kolebanje senzora`,
+          ),
+    );
+  }
+  const gapHours = (Date.parse(d.time) - Date.parse(d.prevTime)) / HOUR_MS;
+  if (gapHours > LONG_SILENCE_HOURS) {
+    out.push(okReason(`Gorivo je nestalo u ${gapText(gapHours)} dok se stroj nije javljao`));
+  }
+  if (d.movedMetres !== null) {
+    out.push(
+      d.movedMetres <= MOVED_METRES
+        ? okReason('Stroj se između očitanja nije pomaknuo')
+        : okReason(`Stroj se između očitanja pomaknuo ${distanceText(d.movedMetres)}`),
+    );
+  }
+  return out;
+}
+
+function cycleReasons(c: TankCycle, beyond: number, cal: TankCalibration): EventReason[] {
+  const min = Math.max(CYCLE_MIN_LITRES, CYCLE_MIN_FRACTION * c.refilledLitres);
+  const out = [
+    c.refillSource === 'maris'
+      ? okReason(`Uliveno prema izdatnici iz Marisa (${litresText(c.refilledLitres)})`)
+      : checkReason('Uliveno prema senzoru — izdatnica još nije u Marisu ili se ne slaže sa senzorom'),
+    counterReason(cal),
+    beyond >= SURE_MARGIN * min
+      ? okReason(`Nedostaje ${litresText(beyond)}, prag ${litresText(min)}`)
+      : checkReason(`Blizu praga: nedostaje ${litresText(beyond)} uz prag ${litresText(min)}`),
+  ];
+  const scale = scaleContradiction(cal, true);
+  if (scale) out.push(scale);
+  return out;
+}
+
+function mismatchReasons(c: TankSlipCheck, a: TankMachineAnalysis): EventReason[] {
+  const tolerance = slipTolerance(c.marisLitres, a.sensorStepLitres ?? 0);
+  const difference = c.differenceLitres ?? 0;
+  const out = [scaleReason(a.calibration)];
+  out.push(
+    Math.abs(difference) >= SURE_MARGIN * tolerance
+      ? okReason(`Razlika ${litresText(Math.abs(difference))} uz dopušteno ±${litresText(tolerance)}`)
+      : checkReason(`Razlika (${litresText(Math.abs(difference))}) je blizu dopuštene (±${litresText(tolerance)})`),
+  );
+  if (difference < 0) {
+    out.push(checkReason('Spremnik je dobio više nego što je izdano — provjerite je li dio punjenja na drugoj izdatnici'));
+  }
+  return out;
+}
+
+function noRefuelReasons(c: TankSlipCheck, a: TankMachineAnalysis): EventReason[] {
+  const threshold = refuelThreshold(a);
+  return [
+    c.sensorThatDay
+      ? okReason('Senzor razine javljao se na dan izdatnice')
+      : checkReason('Stroj se na dan izdatnice nije javljao'),
+    c.marisLitres >= SURE_MARGIN * threshold
+      ? okReason(`Punjenje od ${litresText(c.marisLitres)} jasno bi se vidjelo na senzoru (prag ${litresText(threshold)})`)
+      : checkReason(`Izdatnica (${litresText(c.marisLitres)}) je malena za ovaj senzor (prag ${litresText(threshold)})`),
+  ];
+}
+
+function noSlipReasons(r: TankRefuel, a: TankMachineAnalysis): EventReason[] {
+  const threshold = refuelThreshold(a);
+  return [
+    r.litres >= SURE_MARGIN * threshold
+      ? okReason(`Porast od ${litresText(r.litres)} jasno je dolijevanje (prag ${litresText(threshold)})`)
+      : checkReason(`Porast (${litresText(r.litres)}) je blizu praga za dolijevanje (${litresText(threshold)})`),
+  ];
+}
+
+function confidenceOf(kind: TankEventKind, reasons: EventReason[]): Confidence | null {
+  if (kind === 'refuel_awaiting_slip') return null;
+  return reasons.every((r) => r.ok) ? 'sure' : 'check';
+}
+
+function eventKey(e: Pick<TankEvent, 'serialNumber' | 'kind' | 'day' | 'time' | 'dokBroj'>): string {
+  return [e.serialNumber, e.kind, e.dokBroj !== null ? `${e.day}#${e.dokBroj}` : (e.time ?? e.day)].join('|');
 }
 
 function eventsOf(a: TankMachineAnalysis): TankEvent[] {
@@ -1322,21 +1782,24 @@ function eventsOf(a: TankMachineAnalysis): TankEvent[] {
     dokBroj: null,
   };
   const out: TankEvent[] = [];
+  const push = (e: Omit<TankEvent, 'key' | 'confidence' | 'review'>) =>
+    out.push({ ...e, key: eventKey(e), confidence: confidenceOf(e.kind, e.reasons), review: null });
   for (const d of a.drains) {
-    out.push({
+    push({
       ...base,
       kind: 'drain',
       day: localDay(d.time),
       time: d.time,
       litres: d.litres,
       returnedLitres: d.returnedLitres,
+      reasons: drainReasons(d, a.calibration),
     });
   }
   for (const c of a.cycles) {
     // Only what the flagged drops inside the cycle don't already account for.
     const beyondDrains = c.missingLitres - c.drainLitres;
     if (beyondDrains < Math.max(CYCLE_MIN_LITRES, CYCLE_MIN_FRACTION * c.refilledLitres)) continue;
-    out.push({
+    push({
       ...base,
       kind: 'cycle_loss',
       day: localDay(c.end),
@@ -1346,11 +1809,12 @@ function eventsOf(a: TankMachineAnalysis): TankEvent[] {
       burnedLitres: c.burnedLitres,
       levelChangeLitres: c.levelChangeLitres,
       since: c.start,
+      reasons: cycleReasons(c, beyondDrains, a.calibration),
     });
   }
   for (const c of a.slips) {
     if (c.status !== 'mismatch' && c.status !== 'no_refuel') continue;
-    out.push({
+    push({
       ...base,
       kind: c.status === 'mismatch' ? 'slip_mismatch' : 'slip_no_refuel',
       day: c.date,
@@ -1359,6 +1823,7 @@ function eventsOf(a: TankMachineAnalysis): TankEvent[] {
       tankLitres: c.tankLitres,
       marisLitres: c.marisLitres,
       dokBroj: c.dokBroj,
+      reasons: c.status === 'mismatch' ? mismatchReasons(c, a) : noRefuelReasons(c, a),
     });
   }
   for (const [kind, refuels] of [
@@ -1366,10 +1831,68 @@ function eventsOf(a: TankMachineAnalysis): TankEvent[] {
     ['refuel_awaiting_slip', a.refuelsAwaitingSlip],
   ] as const) {
     for (const r of refuels) {
-      out.push({ ...base, kind, day: localDay(r.time), time: r.time, litres: r.litres, tankLitres: r.litres });
+      push({
+        ...base,
+        kind,
+        day: localDay(r.time),
+        time: r.time,
+        litres: r.litres,
+        tankLitres: r.litres,
+        reasons: kind === 'refuel_no_slip' ? noSlipReasons(r, a) : [],
+      });
     }
   }
   return out;
+}
+
+/**
+ * A slip booked on the wrong work order shows up twice: a slip with no fill on
+ * one machine and a fill with no slip on another, or a fill with no slip and a
+ * slip on a work order that is no machine's. Point each at the other.
+ */
+function crossCheck(events: TankEvent[], looseSlips: SlipInput[]): void {
+  const similar = (litres: number, maris: number) => Math.abs(litres - maris) <= slipTolerance(maris, 0);
+  const near = (a: string, b: string) => Math.abs(dayDiff(a, b)) <= SLIP_MATCH_DAYS;
+  const slipsWithoutFill = events.filter((e) => e.kind === 'slip_no_refuel');
+  for (const e of events) {
+    if (e.kind !== 'refuel_no_slip' && e.kind !== 'refuel_awaiting_slip') continue;
+    const other = slipsWithoutFill.find(
+      (s) => s.serialNumber !== e.serialNumber && near(s.day, e.day) && similar(e.litres, s.marisLitres ?? 0),
+    );
+    const loose = looseSlips.find((s) => near(s.date, e.day) && similar(e.litres, s.litres));
+    if (other) {
+      e.reasons.push(
+        checkReason(
+          `Izdatnica ${other.dokBroj} (${litresText(other.marisLitres ?? 0)}) na stroju ${other.serialNumber} nema dolijevanja — možda je knjižena na krivi stroj`,
+        ),
+      );
+      other.reasons.push(
+        checkReason(
+          `Stroj ${e.serialNumber} oko tog dana ima dolijevanje bez izdatnice (+${litresText(e.litres)}) — možda je izdatnica knjižena na krivi stroj`,
+        ),
+      );
+      other.confidence = confidenceOf(other.kind, other.reasons);
+    } else if (loose) {
+      e.reasons.push(
+        checkReason(
+          `Izdatnica ${loose.dokBroj} od ${litresText(loose.litres)} oko tog dana je na radnom nalogu ${loose.rnalog}, koji nije povezan ni s jednim strojem`,
+        ),
+      );
+    } else if (e.kind === 'refuel_no_slip') {
+      e.reasons.push(okReason('Ni na drugim strojevima ni na drugim radnim nalozima nema izdatnice te količine oko tog dana'));
+    }
+    e.confidence = confidenceOf(e.kind, e.reasons);
+  }
+}
+
+function attachReviews(events: TankEvent[], serials: string[]): void {
+  const reviews = reviewsOf(serials);
+  for (const e of events) e.review = reviews.get(e.key) ?? null;
+}
+
+/** Maris slips over the days loaded for this range (padding and calibration lookback). */
+function marisFor(from: string, to: string) {
+  return marisSlips(loadStartDay(from, to), shiftDay(to, PAD_AFTER_DAYS));
 }
 
 /** Every machine the caller may see: per-machine summary plus a flat list of findings. */
@@ -1379,9 +1902,9 @@ export async function buildTankOverview(
   allowed?: MachineGroup[],
 ): Promise<TankOverview> {
   const machines = listMachines(allowed);
-  // Slips over the same padded days as the readings, so fills just outside the
-  // range pair with their own slips rather than with one inside it.
-  const maris = await marisSlips(shiftDay(from, -PAD_BEFORE_DAYS), shiftDay(to, PAD_AFTER_DAYS));
+  // Slips over the same days as the readings, so fills just outside the range
+  // pair with their own slips rather than with one inside it.
+  const maris = await marisFor(from, to);
   const floor = collectionFloor();
   const overrides = capacityOverrides();
 
@@ -1400,6 +1923,13 @@ export async function buildTankOverview(
     summaries.push(summarise(analysis));
     events.push(...eventsOf(analysis));
   }
+  const machineRnalogs = new Set(listMachines().flatMap((m) => m.rnalogs.map((r) => r.trim())));
+  crossCheck(
+    events,
+    [...maris.byRnalog].filter(([r]) => !machineRnalogs.has(r)).flatMap(([, list]) => list),
+  );
+  const serials = machines.map((m) => m.serialNumber);
+  attachReviews(events, serials);
   events.sort(
     (a, b) => b.day.localeCompare(a.day) || (b.time ?? '').localeCompare(a.time ?? ''),
   );
@@ -1413,6 +1943,7 @@ export async function buildTankOverview(
     marisGraceDays: config.marisGraceDays,
     machines: summaries,
     events,
+    reviewStats: reviewStats(serials),
   };
 }
 
@@ -1424,7 +1955,7 @@ export async function buildTankDetail(
 ): Promise<TankDetail | null> {
   const m = listMachines().find((x) => x.serialNumber === serial);
   if (!m) return null;
-  const maris = await marisSlips(shiftDay(from, -PAD_BEFORE_DAYS), shiftDay(to, PAD_AFTER_DAYS));
+  const maris = await marisFor(from, to);
   const { analysis, levels } = analyseMachine(
     m,
     from,
@@ -1456,6 +1987,8 @@ export async function buildTankDetail(
   const lastLidatTime =
     [m.lastReadingTime, lastLevel].filter((t): t is string => !!t).sort().at(-1) ?? null;
 
+  const events = eventsOf(analysis);
+  attachReviews(events, [serial]);
   return {
     ...analysis,
     from,
@@ -1463,7 +1996,33 @@ export async function buildTankDetail(
     marisError: maris.error,
     levelSeries,
     lastLidatTime,
-    location: locateAt(serial, to),
+    location: positionUpTo(serial, to),
     marisGraceDays: config.marisGraceDays,
+    events,
+  };
+}
+
+/** Every raw reading of one machine between two instants (at most READINGS_MAX_DAYS). */
+export function buildTankReadings(serial: string, fromIso: string, toIso: string): TankReadings | null {
+  const m = listMachines().find((x) => x.serialNumber === serial);
+  if (!m) return null;
+  const capacity = capacityOverrides()[serial] ?? m.fuelTankCapacity;
+  const toMs = Math.min(Date.parse(toIso), Date.parse(fromIso) + READINGS_MAX_DAYS * DAY_MS);
+  const [a, b] = [isoAt(Date.parse(fromIso)), isoAt(toMs)];
+  const fixes = db
+    .prepare(
+      `SELECT latitude, longitude, reading_time FROM lidat_location_fix
+       WHERE serial_number = ? AND reading_time >= ? AND reading_time <= ? ORDER BY reading_time`,
+    )
+    .all(serial, a, b) as Fix[];
+  return {
+    serialNumber: serial,
+    capacity,
+    levels: capacity
+      ? loadLevels(serial, a, b, capacity).map((p) => ({ t: p.time, litres: round1(p.litres) }))
+      : [],
+    counter: loadFuel(serial, a, b).map((p) => ({ t: isoAt(p.ms), litres: p.cum })),
+    engine: loadHours(serial, a, b).map((p) => ({ t: isoAt(p.ms), hours: p.cum })),
+    fixes: fixes.map((f) => ({ t: f.reading_time, latitude: f.latitude, longitude: f.longitude })),
   };
 }

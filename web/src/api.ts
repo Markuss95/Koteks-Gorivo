@@ -15,9 +15,12 @@ import type {
   MachineSeries,
   ManagedUser,
   Role,
+  ReviewVerdict,
   Settings,
   TankDetail,
+  TankEventKind,
   TankOverview,
+  TankReadings,
   UtilizationResult,
   UtilizationSeries,
 } from './types';
@@ -125,6 +128,20 @@ export const api = {
     get<TankOverview>(`/api/tank?from=${from}&to=${to}`),
   tankDetail: (serial: string, from: string, to: string) =>
     get<TankDetail>(`/api/tank/${encodeURIComponent(serial)}?from=${from}&to=${to}`),
+  // Every raw reading of one machine between two instants (a few days at most).
+  tankReadings: (serial: string, from: string, to: string) =>
+    get<TankReadings>(
+      `/api/tank/${encodeURIComponent(serial)}/readings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+  // What was found when checking an event; a null verdict withdraws it.
+  saveTankReview: (review: {
+    key: string;
+    serialNumber: string;
+    kind: TankEventKind;
+    day: string;
+    verdict: ReviewVerdict | null;
+    note: string;
+  }) => send<{ ok: boolean }>('/api/tank/review', 'PUT', review),
   // Admin: correct a tank size LiDAT reports wrongly (null clears it).
   setTankCapacity: (serial: string, litres: number | null) =>
     send<{ ok: boolean }>(`/api/tank/${encodeURIComponent(serial)}/capacity`, 'PUT', { litres }),

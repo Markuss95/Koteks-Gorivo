@@ -13,6 +13,8 @@ import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { TankDetail } from '../components/TankDetail';
+import { CalibrationCell, ConfidenceBadge, ReviewBadge } from '../components/TankEvidence';
+import { EVENT_LABELS, clock, eventDetail, shiftDay } from '../tankText';
 
 // Fallback floor until the backend reports the authoritative value.
 const MIN_DATE_FALLBACK = '2026-05-27';
@@ -21,21 +23,6 @@ const DEFAULT_DAYS = 10;
 
 // Tank-level collection started on this day; nothing earlier to show.
 const TANK_FLOOR = '2026-09-16';
-
-function shiftDay(day: string, days: number): string {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-export const EVENT_LABELS: Record<TankEventKind, string> = {
-  drain: 'Odljev iz spremnika',
-  cycle_loss: 'Manjak između punjenja',
-  slip_mismatch: 'Izdatnica ≠ dolijevanje',
-  slip_no_refuel: 'Izdatnica bez dolijevanja',
-  refuel_no_slip: 'Dolijevanje bez izdatnice',
-  refuel_awaiting_slip: 'Dolijevanje čeka Maris',
-};
 
 const EVENT_ORDER: TankEventKind[] = [
   'drain',
@@ -77,7 +64,7 @@ function nextSort<K>(key: K) {
     s && s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 };
 }
 
-type EventSortKey = 'date' | 'time' | 'machine' | 'kind' | 'litres';
+type EventSortKey = 'date' | 'time' | 'machine' | 'kind' | 'litres' | 'confidence' | 'review';
 
 function eventValue(e: TankEvent, key: EventSortKey): number | string | null {
   switch (key) {
@@ -91,6 +78,10 @@ function eventValue(e: TankEvent, key: EventSortKey): number | string | null {
       return EVENT_ORDER.indexOf(e.kind);
     case 'litres':
       return e.litres;
+    case 'confidence':
+      return e.confidence === 'sure' ? 2 : e.confidence === 'check' ? 1 : 0;
+    case 'review':
+      return e.review ? (e.review.verdict === 'confirmed' ? 2 : 1) : 0;
   }
 }
 
@@ -126,44 +117,6 @@ function machineValue(m: TankMachineSummary, key: MachineSortKey): number | stri
   }
 }
 
-/** Time of day in Croatia, e.g. '11:50'. */
-function clock(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' });
-}
-
-/** graceDays: how long a refuel waits for its izdatnica, once known. */
-function eventDetail(e: TankEvent, graceDays: number | null): string {
-  switch (e.kind) {
-    case 'drain': {
-      // Part of the drop the reading got back is the sensor wavering, not fuel.
-      const returned = e.returnedLitres ?? 0;
-      const wavered =
-        returned >= 1 ? ` (pad ${fmt(e.litres + returned, 0)} L, od toga ${fmt(returned, 0)} L kolebanje očitanja)` : '';
-      return `${fmt(e.litres, 0)} L napustilo spremnik bez potrošnje motora${wavered}`;
-    }
-    case 'cycle_loss': {
-      const change = e.levelChangeLitres ?? 0;
-      const gross = (e.tankLitres ?? 0) - change - (e.burnedLitres ?? 0);
-      const level =
-        Math.abs(change) >= 1 ? `, spremnik na kraju ${fmt(Math.abs(change), 0)} L ${change < 0 ? 'niži' : 'viši'}` : '';
-      const extra =
-        Math.abs(gross - e.litres) > 1 ? ` (${fmt(e.litres, 0)} L izvan već prikazanih odljeva)` : '';
-      return `Od ${fmtDateTime(e.since)}: uliveno ${fmt(e.tankLitres, 0)} L, motor potrošio ${fmt(e.burnedLitres, 0)} L${level} — nedostaje ${fmt(gross, 0)} L${extra}`;
-    }
-    case 'slip_mismatch':
-      return `Maris ${fmt(e.marisLitres, 0)} L · spremnik +${fmt(e.tankLitres, 0)} L (izdatnica ${e.dokBroj})`;
-    case 'slip_no_refuel':
-      return `Maris ${fmt(e.marisLitres, 0)} L (izdatnica ${e.dokBroj}) · senzor nije vidio dolijevanje`;
-    case 'refuel_no_slip':
-      return `Spremnik +${fmt(e.tankLitres, 0)} L · nema izdatnice u Marisu`;
-    case 'refuel_awaiting_slip': {
-      const until = graceDays != null ? ` (čeka se do ${fmtDate(shiftDay(e.day, graceDays))})` : '';
-      return `Spremnik +${fmt(e.tankLitres, 0)} L · izdatnica još nije u Marisu${until}`;
-    }
-  }
-}
-
 export function TankPage({
   allowedGroups,
   isAdmin,
@@ -181,7 +134,10 @@ export function TankPage({
     () => new Set<MachineGroup>([allowedGroups.includes('osijek') ? 'osijek' : allowedGroups[0] ?? 'osijek']),
   );
   const [kinds, setKinds] = useState<Set<TankEventKind>>(() => new Set(DEFAULT_KINDS));
-  const [detail, setDetail] = useState<{ serial: string; model: string } | null>(null);
+  // focusKey: the event the drawer was opened on, whose evidence it shows first.
+  const [detail, setDetail] = useState<{ serial: string; model: string; focusKey?: string } | null>(null);
+  const [onlySure, setOnlySure] = useState(false);
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(false);
   // Machine table opens sorted by sensor precision, most precise first; the
   // events table keeps its default (newest first) until a column is chosen.
   const [sort, setSort] = useState<Sort<MachineSortKey>>({ key: 'sensor', dir: -1 });
@@ -277,9 +233,22 @@ export function TankPage({
     [data, groups],
   );
   const events = useMemo(() => {
-    const rows = groupEvents.filter((e) => kinds.has(e.kind));
+    const rows = groupEvents.filter(
+      (e) => kinds.has(e.kind) && (!onlySure || e.confidence === 'sure') && (!onlyUnreviewed || !e.review),
+    );
     return eventSort ? rows.sort(compareBy(eventValue, eventSort)) : rows;
-  }, [groupEvents, kinds, eventSort]);
+  }, [groupEvents, kinds, eventSort, onlySure, onlyUnreviewed]);
+
+  // How each kind of finding has held up on site so far (all reviews, not just this range).
+  const reviewSummary = useMemo(() => {
+    if (!data) return null;
+    const parts = EVENT_ORDER.flatMap((k) => {
+      const r = data.reviewStats[k];
+      const n = r ? r.confirmed + r.falseAlarm : 0;
+      return n ? [`${EVENT_LABELS[k].toLowerCase()}: ${r.confirmed} od ${n} potvrđeno`] : [];
+    });
+    return parts.length ? parts.join(' · ') : null;
+  }, [data]);
   const graceDays = data?.marisGraceDays ?? null;
 
   const totals = useMemo(() => {
@@ -355,7 +324,10 @@ export function TankPage({
           dolijevanje, a u Marisu ni nakon {data?.marisGraceDays ?? graceDays ?? 'nekoliko'} dana nema
           izdatnice za taj dan. Maris kasni s unosom (i do tri tjedna), ali izdatnicu datira danom
           punjenja, pa je mlađe dolijevanje bez izdatnice samo <strong>čeka Maris</strong>, a ne
-          nalaz.
+          nalaz. Svaki nalaz je <strong>siguran</strong> kad sve provjere iza njega stoje (npr. motor
+          nije radio, senzor je potvrđen izdatnicama ili brojačem potrošnje), inače{' '}
+          <strong>provjeriti</strong>, uz razlog. Kliknite događaj za dokaze (sva očitanja oko njega
+          i gdje je stroj stajao) i upišite što je utvrđeno na terenu.
           {data?.levelHistoryFrom && (
             <>
               {' '}
@@ -440,6 +412,9 @@ export function TankPage({
               <tr>
                 {th('Stroj', 'model')}
                 {th('Senzor razine', 'sensor')}
+                <th title="Usporedba senzora razine s izdatnicama (Maris) i s brojačem potrošnje, zadnjih 30 dana">
+                  Provjera senzora
+                </th>
                 {th('Dolijevanja', 'refuelCount', true)}
                 {th('Izdatnice u redu', 'slipOkShare', true)}
                 {th('Bez dolijevanja', 'slipNoRefuel', true)}
@@ -473,6 +448,9 @@ export function TankPage({
                       m.sensorStepLitres != null &&
                       ` (~${fmt(m.sensorStepLitres, 0)} L)`}
                   </td>
+                  <td>
+                    <CalibrationCell calibration={m.calibration} />
+                  </td>
                   <td className="num">{m.refuelCount || '—'}</td>
                   <td className="num">
                     {m.slipCount - m.slipUnchecked > 0 ? `${m.slipOk}/${m.slipCount - m.slipUnchecked}` : '—'}
@@ -499,7 +477,7 @@ export function TankPage({
               ))}
               {machines.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                  <td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 30 }}>
                     Nema strojeva u odabranoj grupi.
                   </td>
                 </tr>
@@ -544,6 +522,21 @@ export function TankPage({
             </label>
           ))}
         </div>
+        <div className="review-actions" style={{ marginBottom: 12 }}>
+          <label className="toggle">
+            <input type="checkbox" checked={onlySure} onChange={(e) => setOnlySure(e.target.checked)} />
+            Samo sigurni
+          </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={onlyUnreviewed}
+              onChange={(e) => setOnlyUnreviewed(e.target.checked)}
+            />
+            Samo neprovjereni na terenu
+          </label>
+        </div>
+        {reviewSummary && <div className="review-stats">Dosadašnje provjere na terenu — {reviewSummary}</div>}
         {loading ? (
           <div className="spinner">Učitavanje…</div>
         ) : (
@@ -555,15 +548,17 @@ export function TankPage({
                 {eventTh('Stroj', 'machine')}
                 {eventTh('Vrsta', 'kind')}
                 {eventTh('Opis', 'litres')}
+                {eventTh('Pouzdanost', 'confidence')}
+                {eventTh('Provjera', 'review')}
               </tr>
             </thead>
             <tbody>
               {events.map((e, i) => (
                 <tr
-                  key={`${e.serialNumber}-${e.kind}-${e.day}-${e.time ?? e.dokBroj}-${i}`}
+                  key={`${e.key}-${i}`}
                   className="clickable"
-                  onClick={() => setDetail({ serial: e.serialNumber, model: e.model })}
-                  title="Prikaži razinu goriva u spremniku"
+                  onClick={() => setDetail({ serial: e.serialNumber, model: e.model, focusKey: e.key })}
+                  title="Prikaži dokaze za ovaj događaj"
                 >
                   <td>{fmtDate(e.day)}</td>
                   <td className="muted">{clock(e.time)}</td>
@@ -574,11 +569,17 @@ export function TankPage({
                     {EVENT_LABELS[e.kind]}
                   </td>
                   <td className="muted">{eventDetail(e, graceDays)}</td>
+                  <td>
+                    <ConfidenceBadge event={e} />
+                  </td>
+                  <td>
+                    <ReviewBadge review={e.review} />
+                  </td>
                 </tr>
               ))}
               {events.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                  <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 30 }}>
                     Nema sumnjivih događaja u odabranom razdoblju.
                   </td>
                 </tr>
@@ -595,8 +596,10 @@ export function TankPage({
           from={from}
           to={to}
           isAdmin={isAdmin}
+          focus={detail.focusKey ? (data?.events.find((e) => e.key === detail.focusKey) ?? null) : null}
           onClose={() => setDetail(null)}
           onCapacityChanged={run}
+          onReviewed={run}
         />
       )}
     </>
