@@ -153,8 +153,9 @@ export interface TankCycle {
   end: string;
   refilledLitres: number;
   refillSource: 'maris' | 'sensor';
-  burnedLitres: number;
-  missingLitres: number;
+  burnedLitres: number; // the most the engine can have burned in between
+  levelChangeLitres: number; // level after the closing fill − after the opening one
+  missingLitres: number; // refilled − level change − burned
   drainLitres: number;
 }
 
@@ -169,8 +170,9 @@ export interface TankRefuel {
 export interface TankDrain {
   time: string;
   prevTime: string;
-  litres: number;
-  burnedLitres: number;
+  litres: number; // left unburned and stayed missing
+  burnedLitres: number; // the most the engine can have burned
+  returnedLitres: number; // part of the drop the reading got back soon after (or had gained just before)
   levelBefore: number;
   levelAfter: number;
   // The machine's stored GPS fix for that day, if any.
@@ -179,7 +181,8 @@ export interface TankDrain {
   locationTime: string | null;
 }
 
-export type SlipStatus = 'ok' | 'mismatch' | 'no_refuel' | 'no_data';
+// 'too_small': no rise found, but the slip is too small for this sensor to show.
+export type SlipStatus = 'ok' | 'mismatch' | 'no_refuel' | 'too_small' | 'no_data';
 
 export interface TankSlipCheck {
   date: string;
@@ -192,6 +195,10 @@ export interface TankSlipCheck {
   refuelTime: string | null;
   differenceLitres: number | null;
   status: SlipStatus;
+  // Checked together with these other slips (one fill booked on several), and
+  // against this many fills (two for one slip covering a fill in two goes).
+  sharedWith: number[];
+  fills: number;
 }
 
 export interface TankMachineSummary {
@@ -210,7 +217,7 @@ export interface TankMachineSummary {
   slipOk: number;
   slipMismatch: number;
   slipNoRefuel: number;
-  slipNoData: number;
+  slipUnchecked: number; // no level data around it, or too small for the sensor
   refuelsWithoutSlip: number;
   refuelsAwaitingSlip: number;
   drainCount: number;
@@ -250,6 +257,8 @@ export interface TankEvent {
   tankLitres: number | null;
   marisLitres: number | null;
   burnedLitres: number | null;
+  levelChangeLitres: number | null; // cycle_loss: level after the closing fill − after the opening one
+  returnedLitres: number | null; // drain: part of the drop the reading got back
   since: string | null;
   dokBroj: number | null;
 }

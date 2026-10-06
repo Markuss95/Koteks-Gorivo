@@ -116,7 +116,7 @@ function machineValue(m: TankMachineSummary, key: MachineSortKey): number | stri
     case 'sensor':
       return SENSOR_RANK[m.sensor] * 1_000_000 - Math.min(m.sensorStepLitres ?? NO_STEP, NO_STEP);
     case 'slipOkShare': {
-      const slips = m.slipCount - m.slipNoData;
+      const slips = m.slipCount - m.slipUnchecked;
       return slips > 0 ? m.slipOk / slips : null;
     }
     case 'cycleMissingLitres':
@@ -135,13 +135,21 @@ function clock(iso: string | null): string {
 /** graceDays: how long a refuel waits for its izdatnica, once known. */
 function eventDetail(e: TankEvent, graceDays: number | null): string {
   switch (e.kind) {
-    case 'drain':
-      return `${fmt(e.litres, 0)} L napustilo spremnik bez potrošnje motora`;
+    case 'drain': {
+      // Part of the drop the reading got back is the sensor wavering, not fuel.
+      const returned = e.returnedLitres ?? 0;
+      const wavered =
+        returned >= 1 ? ` (pad ${fmt(e.litres + returned, 0)} L, od toga ${fmt(returned, 0)} L kolebanje očitanja)` : '';
+      return `${fmt(e.litres, 0)} L napustilo spremnik bez potrošnje motora${wavered}`;
+    }
     case 'cycle_loss': {
-      const gross = (e.tankLitres ?? 0) - (e.burnedLitres ?? 0);
+      const change = e.levelChangeLitres ?? 0;
+      const gross = (e.tankLitres ?? 0) - change - (e.burnedLitres ?? 0);
+      const level =
+        Math.abs(change) >= 1 ? `, spremnik na kraju ${fmt(Math.abs(change), 0)} L ${change < 0 ? 'niži' : 'viši'}` : '';
       const extra =
         Math.abs(gross - e.litres) > 1 ? ` (${fmt(e.litres, 0)} L izvan već prikazanih odljeva)` : '';
-      return `Od ${fmtDateTime(e.since)}: uliveno ${fmt(e.tankLitres, 0)} L, motor potrošio ${fmt(e.burnedLitres, 0)} L — nedostaje ${fmt(gross, 0)} L${extra}`;
+      return `Od ${fmtDateTime(e.since)}: uliveno ${fmt(e.tankLitres, 0)} L, motor potrošio ${fmt(e.burnedLitres, 0)} L${level} — nedostaje ${fmt(gross, 0)} L${extra}`;
     }
     case 'slip_mismatch':
       return `Maris ${fmt(e.marisLitres, 0)} L · spremnik +${fmt(e.tankLitres, 0)} L (izdatnica ${e.dokBroj})`;
@@ -284,7 +292,7 @@ export function TankPage({
       cycleLitres: litres(of('cycle_loss')),
       mismatch: of('slip_mismatch').length,
       noRefuel: of('slip_no_refuel').length,
-      slips: machines.reduce((s, m) => s + m.slipCount - m.slipNoData, 0),
+      slips: machines.reduce((s, m) => s + m.slipCount - m.slipUnchecked, 0),
       slipsOk: machines.reduce((s, m) => s + m.slipOk, 0),
     };
   }, [groupEvents, machines]);
@@ -338,10 +346,12 @@ export function TankPage({
         <div className="muted">
           Razina goriva u spremniku (LiDAT senzor) uspoređuje se s izdatnicama iz Marisa i s
           potrošnjom motora. <strong>Odljev</strong>: razina je naglo pala barem 15 L više nego što je
-          motor potrošio. <strong>Manjak između punjenja</strong>: između dva punjenja do punog
+          motor mogao potrošiti i tako ostala (pad koji se ubrzo vrati, npr. stroj na nagibu, nije
+          odljev). <strong>Manjak između punjenja</strong>: između dva punjenja do punog
           spremnika uliveno je više goriva nego što je motor potrošio (za senzore koji ne mogu
-          pokazati pojedinačni odljev). <strong>Izdatnica bez dolijevanja</strong>: senzor taj dan nije
-          vidio da je gorivo uliveno. <strong>Dolijevanje bez izdatnice</strong>: senzor je vidio
+          pokazati pojedinačni odljev). <strong>Izdatnica bez dolijevanja</strong>: senzor oko dana
+          izdatnice nije vidio da je gorivo uliveno (samo za izdatnice dovoljno velike da ih senzor
+          može vidjeti). <strong>Dolijevanje bez izdatnice</strong>: senzor je vidio
           dolijevanje, a u Marisu ni nakon {data?.marisGraceDays ?? graceDays ?? 'nekoliko'} dana nema
           izdatnice za taj dan. Maris kasni s unosom (i do tri tjedna), ali izdatnicu datira danom
           punjenja, pa je mlađe dolijevanje bez izdatnice samo <strong>čeka Maris</strong>, a ne
@@ -465,7 +475,7 @@ export function TankPage({
                   </td>
                   <td className="num">{m.refuelCount || '—'}</td>
                   <td className="num">
-                    {m.slipCount - m.slipNoData > 0 ? `${m.slipOk}/${m.slipCount - m.slipNoData}` : '—'}
+                    {m.slipCount - m.slipUnchecked > 0 ? `${m.slipOk}/${m.slipCount - m.slipUnchecked}` : '—'}
                   </td>
                   <td className={`num ${m.slipNoRefuel ? 'neg' : ''}`}>{m.slipNoRefuel || '—'}</td>
                   <td className="num" title={m.refuelsAwaitingSlip ? `${m.refuelsAwaitingSlip} još čeka izdatnicu u Marisu` : undefined}>

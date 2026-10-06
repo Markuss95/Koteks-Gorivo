@@ -23,6 +23,7 @@ const SLIP_STATUS: Record<SlipStatus, { label: string; cls: string }> = {
   ok: { label: 'u redu', cls: 'pos' },
   mismatch: { label: 'razlika', cls: 'neg' },
   no_refuel: { label: 'nema dolijevanja', cls: 'neg' },
+  too_small: { label: 'premalo za senzor', cls: 'muted' },
   no_data: { label: 'nema podataka o razini', cls: 'muted' },
 };
 
@@ -132,6 +133,8 @@ export function TankDetail({
   }, [data]);
 
   const cap = data?.tankCapacity ?? null;
+  // Show the wavering column only when some drop partly came back.
+  const drainsWavered = !!data?.drains.some((d) => d.returnedLitres >= 1);
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
@@ -390,7 +393,16 @@ export function TankDetail({
                         {c.differenceLitres == null ? '—' : fmt(c.differenceLitres, 0)}
                       </td>
                       <td className="muted">{c.refuelTime ? fmtDateTime(c.refuelTime) : '—'}</td>
-                      <td className={SLIP_STATUS[c.status].cls}>{SLIP_STATUS[c.status].label}</td>
+                      <td className={SLIP_STATUS[c.status].cls}>
+                        {SLIP_STATUS[c.status].label}
+                        {(c.sharedWith.length > 0 || c.fills > 1) && (
+                          <span className="muted">
+                            {' '}
+                            (zajedno{c.sharedWith.length > 0 && ` s ${c.sharedWith.join(', ')}`}
+                            {c.fills > 1 && `, ${c.fills} dolijevanja`})
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {data.slips.length === 0 && (
@@ -408,8 +420,10 @@ export function TankDetail({
               <div className="panel">
                 <h2>Odljevi iz spremnika</h2>
                 <div className="muted" style={{ marginBottom: 12 }}>
-                  Razina je naglo pala više nego što je motor potrošio u istom razdoblju. Kliknite redak
-                  za lokaciju stroja taj dan.
+                  Razina je naglo pala barem 15 L više nego što je motor u istom razdoblju mogao
+                  potrošiti i tako ostala. Dio pada koji se ubrzo vratio (ili je prije toga bez
+                  izdatnice porastao) je kolebanje očitanja, ne gorivo. Kliknite redak za lokaciju stroja
+                  taj dan.
                 </div>
                 <table>
                   <thead>
@@ -417,6 +431,7 @@ export function TankDetail({
                       <th>Vrijeme</th>
                       <th className="num">Razina prije → poslije (L)</th>
                       <th className="num">Motor potrošio (L)</th>
+                      {drainsWavered && <th className="num">Kolebanje očitanja (L)</th>}
                       <th className="num">Bez potrošnje (L)</th>
                     </tr>
                   </thead>
@@ -432,12 +447,15 @@ export function TankDetail({
                           {fmt(d.levelBefore, 0)} → {fmt(d.levelAfter, 0)}
                         </td>
                         <td className="num">{fmt(d.burnedLitres, 0)}</td>
+                        {drainsWavered && (
+                          <td className="num muted">{d.returnedLitres >= 1 ? fmt(d.returnedLitres, 0) : '—'}</td>
+                        )}
                         <td className="num neg">{fmt(d.litres, 0)}</td>
                       </tr>
                     ))}
                     {data.drains.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="muted" style={{ textAlign: 'center', padding: 20 }}>
+                        <td colSpan={drainsWavered ? 5 : 4} className="muted" style={{ textAlign: 'center', padding: 20 }}>
                           Nema odljeva u razdoblju.
                         </td>
                       </tr>
@@ -459,9 +477,10 @@ export function TankDetail({
             <div className="panel">
               <h2>Između punjenja do punog spremnika</h2>
               <div className="muted" style={{ marginBottom: 12 }}>
-                Kad se spremnik dvaput napuni do vrha, drugo punjenje vraća točno ono što je u
-                međuvremenu izašlo iz spremnika. Ono što motor nije potrošio izašlo je na drugi način.
-                Uliveno se uzima iz Marisa kad se izdatnica slaže sa senzorom, inače sa senzora.
+                Kad se spremnik dvaput napuni do vrha, drugo punjenje vraća ono što je u međuvremenu
+                izašlo iz spremnika (uz razliku razine nakon dva punjenja). Ono što motor nije potrošio
+                izašlo je na drugi način. Uliveno se uzima iz Marisa kad se izdatnica slaže sa senzorom,
+                inače sa senzora.
               </div>
               <table>
                 <thead>
@@ -469,6 +488,9 @@ export function TankDetail({
                     <th>Od punjenja</th>
                     <th>Do punjenja</th>
                     <th className="num">Uliveno (L)</th>
+                    <th className="num" title="Razina nakon drugog punjenja − razina nakon prvog">
+                      Razlika razine (L)
+                    </th>
                     <th className="num">Motor potrošio (L)</th>
                     <th className="num">Nedostaje (L)</th>
                   </tr>
@@ -482,13 +504,18 @@ export function TankDetail({
                         {fmt(c.refilledLitres, 0)}{' '}
                         <span className="muted">({c.refillSource === 'maris' ? 'Maris' : 'senzor'})</span>
                       </td>
+                      <td className="num muted">
+                        {Math.abs(c.levelChangeLitres) >= 1
+                          ? `${c.levelChangeLitres > 0 ? '+' : ''}${fmt(c.levelChangeLitres, 0)}`
+                          : '—'}
+                      </td>
                       <td className="num">{fmt(c.burnedLitres, 0)}</td>
                       <td className={`num ${c.missingLitres >= 30 ? 'neg' : ''}`}>{fmt(c.missingLitres, 0)}</td>
                     </tr>
                   ))}
                   {data.cycles.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 20 }}>
+                      <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 20 }}>
                         U razdoblju nema dva uzastopna punjenja do punog spremnika.
                       </td>
                     </tr>
