@@ -291,6 +291,8 @@ export interface TankDetail {
   levelSeries: Array<{ t: string; litres: number }>;
   // Newest LiDAT reading of any kind for this machine, whatever the range.
   lastLidatTime: string | null;
+  // The machine's last stored GPS fix up to the end of the range.
+  location: { latitude: number | null; longitude: number | null; locationTime: string | null };
   marisGraceDays: number;
 }
 

@@ -255,6 +255,9 @@ export interface TankDetail extends TankMachineAnalysis {
   // Newest LiDAT reading of any kind for this machine (fuel or tank level),
   // whatever the selected range: when LiDAT last reported it.
   lastLidatTime: string | null;
+  // Where the machine was at the end of the range: its last stored GPS fix up to
+  // that day (today's comes from the fleet snapshot).
+  location: Pick<TankDrain, 'latitude' | 'longitude' | 'locationTime'>;
   marisGraceDays: number;
 }
 
@@ -984,6 +987,7 @@ export async function buildTankDetail(
     marisError: maris.error,
     levelSeries,
     lastLidatTime,
+    location: locateAt(serial, to),
     marisGraceDays: config.marisGraceDays,
   };
 }

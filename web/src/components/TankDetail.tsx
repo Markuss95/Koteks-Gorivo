@@ -349,6 +349,21 @@ export function TankDetail({
             </div>
 
             <div className="panel">
+              <h2>Lokacija stroja</h2>
+              {data.location.latitude != null && data.location.longitude != null ? (
+                <>
+                  <LocationMiniMap lat={data.location.latitude} lng={data.location.longitude} />
+                  <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                    {data.location.latitude.toFixed(5)}, {data.location.longitude.toFixed(5)} · zadnja
+                    poznata pozicija do {fmtDate(data.to)}, zabilježena {fmtDateTime(data.location.locationTime)}
+                  </div>
+                </>
+              ) : (
+                <div className="muted">Za ovaj stroj nema zabilježene pozicije do {fmtDate(data.to)}</div>
+              )}
+            </div>
+
+            <div className="panel">
               <h2>Izdatnice (Maris) i dolijevanja u spremnik</h2>
               <table>
                 <thead>
