@@ -110,6 +110,14 @@ export function TankDetail({
 
   useEffect(() => setFocusKey(focus?.key ?? null), [focus?.key]);
 
+  // Esc closes the evidence modal (the drawer stays open).
+  useEffect(() => {
+    if (!focusKey) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFocusKey(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusKey]);
+
   // The page's copy of the event also points at other machines (a slip booked on
   // the wrong one); the drawer's own copy has the latest review.
   const focusEvent = useMemo<TankEvent | null>(() => {
@@ -207,17 +215,22 @@ export function TankDetail({
               </div>
             )}
 
+            {/* Evidence opens as its own modal over the drawer, at a width the chart can use. */}
             {focusEvent && (
-              <EventEvidence
-                event={focusEvent}
-                detail={data}
-                graceDays={data.marisGraceDays}
-                onClose={() => setFocusKey(null)}
-                onReviewed={() => {
-                  setRefresh((n) => n + 1);
-                  onReviewed?.();
-                }}
-              />
+              <div className="dialog-overlay" onClick={() => setFocusKey(null)}>
+                <div className="evidence-modal" onClick={(e) => e.stopPropagation()}>
+                  <EventEvidence
+                    event={focusEvent}
+                    detail={data}
+                    graceDays={data.marisGraceDays}
+                    onClose={() => setFocusKey(null)}
+                    onReviewed={() => {
+                      setRefresh((n) => n + 1);
+                      onReviewed?.();
+                    }}
+                  />
+                </div>
+              </div>
             )}
 
             <div style={{ marginBottom: 8 }}>
@@ -307,6 +320,17 @@ export function TankDetail({
                       labelFormatter={(t) => fmtDateTime(new Date(t as number).toISOString())}
                       formatter={(v: number, name) => [`${fmt(v, 0)} L`, name]}
                     />
+                    {/* When the engine stood still: a faint grey band. */}
+                    {data.engineOff.map((s) => (
+                      <ReferenceArea
+                        key={`off-${s.from}`}
+                        x1={Date.parse(s.from)}
+                        x2={Date.parse(s.to)}
+                        fill="#8b9bab"
+                        fillOpacity={0.16}
+                        ifOverflow="hidden"
+                      />
+                    ))}
                     {/* When fuel left unburned: a light band over the time it happened. */}
                     {drainMarks.map((d) => (
                       <ReferenceArea
@@ -392,6 +416,11 @@ export function TankDetail({
                   <span>
                     <i style={{ background: '#3fb950' }} /> Dolijevanje (+ L uliveno)
                   </span>
+                  {data.engineOff.length > 0 && (
+                    <span title="Brojač radnih sati motora je stajao barem 30 minuta">
+                      <i style={{ background: 'rgba(139,155,171,0.35)', height: 10 }} /> Motor ugašen
+                    </span>
+                  )}
                   {data.sensor === 'fine' && (
                     <span>
                       <i style={{ background: '#f85149' }} /> Odljev: gorivo je izašlo iz spremnika, a

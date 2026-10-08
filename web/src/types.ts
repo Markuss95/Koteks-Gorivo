@@ -238,6 +238,7 @@ export interface TankReadings {
   counter: Array<{ t: string; litres: number }>; // cumulative
   engine: Array<{ t: string; hours: number }>; // cumulative operating hours
   fixes: Array<{ t: string; latitude: number; longitude: number }>;
+  engineOff: EngineOffSpan[];
 }
 
 export interface TankMachineSummary {
@@ -351,6 +352,13 @@ export interface TankDetail {
   marisGraceDays: number;
   calibration: TankCalibration;
   events: TankEvent[]; // this machine's findings, judged on its own data
+  engineOff: EngineOffSpan[]; // when the engine stood still, for the chart
+}
+
+/** A stretch with the engine off: its hour counter stood still from `from` to `to`. */
+export interface EngineOffSpan {
+  from: string;
+  to: string;
 }
 
 export interface HealthResponse {

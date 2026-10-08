@@ -171,6 +171,12 @@ const MOVED_METRES = 100;
 // The first reading after a silence comes as the engine starts, so a few minutes
 // of running between the readings still means it stood still while fuel left.
 const ENGINE_OFF_HOURS = 0.1;
+// The charts shade where the engine stood still for at least this long (shorter
+// pauses would only clutter them).
+const ENGINE_OFF_MIN_MINUTES = 30;
+// Between two hour-counter readings a minute or so of running is rounding or
+// the engine starting; per step, at most this, or a tenth of the step's length.
+const ENGINE_STILL_STEP_HOURS = 0.02;
 // The raw readings behind one event are served for at most this long a window.
 const READINGS_MAX_DAYS = 5;
 
@@ -399,6 +405,13 @@ export interface TankDetail extends TankMachineAnalysis {
   location: Pick<TankDrain, 'latitude' | 'longitude' | 'locationTime'>;
   marisGraceDays: number;
   events: TankEvent[]; // this machine's findings, judged on its own data
+  engineOff: EngineOffSpan[]; // when the engine stood still, for the chart
+}
+
+/** A stretch with the engine off: its hour counter stood still from `from` to `to`. */
+export interface EngineOffSpan {
+  from: string;
+  to: string;
 }
 
 /** The raw readings behind an event, for checking it by hand. */
@@ -409,6 +422,7 @@ export interface TankReadings {
   counter: Array<{ t: string; litres: number }>; // cumulative, as the counter reports it
   engine: Array<{ t: string; hours: number }>; // cumulative operating hours
   fixes: Array<{ t: string; latitude: number; longitude: number }>;
+  engineOff: EngineOffSpan[];
 }
 
 export interface LevelPoint {
@@ -514,6 +528,35 @@ function loadHours(serial: string, fromIso: string, toIso: string): FuelPoint[] 
     )
     .all(serial, fromIso, toIso) as Array<{ reading_time: string; hours_cum: number }>;
   return rows.map((r) => ({ ms: Date.parse(r.reading_time), cum: r.hours_cum }));
+}
+
+/**
+ * When the engine stood still: runs of consecutive operating-hour readings that
+ * barely moved, at least ENGINE_OFF_MIN_MINUTES long. Most machines don't report
+ * while off, so a night is usually one step from the evening's last reading to
+ * the morning's first; some keep reporting with the counter standing still.
+ */
+export function engineOffSpans(hours: FuelPoint[]): EngineOffSpan[] {
+  const out: EngineOffSpan[] = [];
+  let start = -1;
+  const close = (end: number) => {
+    if (start >= 0 && hours[end].ms - hours[start].ms >= ENGINE_OFF_MIN_MINUTES * 60_000) {
+      out.push({ from: isoAt(hours[start].ms), to: isoAt(hours[end].ms) });
+    }
+    start = -1;
+  };
+  for (let i = 1; i < hours.length; i++) {
+    const stepHours = (hours[i].ms - hours[i - 1].ms) / HOUR_MS;
+    const ran = hours[i].cum - hours[i - 1].cum;
+    const still = ran <= Math.max(ENGINE_STILL_STEP_HOURS, Math.min(ENGINE_OFF_HOURS, 0.1 * stepHours));
+    if (still) {
+      if (start < 0) start = i - 1;
+    } else {
+      close(i - 1);
+    }
+  }
+  if (start >= 0) close(hours.length - 1);
+  return out;
 }
 
 /** Resolution of a machine's tank sensor, judged on its recent readings. */
@@ -1999,6 +2042,14 @@ export async function buildTankDetail(
     location: positionUpTo(serial, to),
     marisGraceDays: config.marisGraceDays,
     events,
+    // A day either side, so a night at either end of the chart is shaded whole.
+    engineOff: engineOffSpans(
+      loadHours(
+        serial,
+        isoAt(Date.parse(`${from}T00:00:00Z`) - DAY_MS),
+        isoAt(Date.parse(`${to}T23:59:59Z`) + DAY_MS),
+      ),
+    ),
   };
 }
 
@@ -2015,6 +2066,7 @@ export function buildTankReadings(serial: string, fromIso: string, toIso: string
        WHERE serial_number = ? AND reading_time >= ? AND reading_time <= ? ORDER BY reading_time`,
     )
     .all(serial, a, b) as Fix[];
+  const engine = loadHours(serial, a, b);
   return {
     serialNumber: serial,
     capacity,
@@ -2022,7 +2074,8 @@ export function buildTankReadings(serial: string, fromIso: string, toIso: string
       ? loadLevels(serial, a, b, capacity).map((p) => ({ t: p.time, litres: round1(p.litres) }))
       : [],
     counter: loadFuel(serial, a, b).map((p) => ({ t: isoAt(p.ms), litres: p.cum })),
-    engine: loadHours(serial, a, b).map((p) => ({ t: isoAt(p.ms), hours: p.cum })),
+    engine: engine.map((p) => ({ t: isoAt(p.ms), hours: p.cum })),
     fixes: fixes.map((f) => ({ t: f.reading_time, latitude: f.latitude, longitude: f.longitude })),
+    engineOff: engineOffSpans(engine),
   };
 }

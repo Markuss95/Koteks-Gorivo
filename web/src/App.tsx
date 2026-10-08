@@ -13,8 +13,8 @@ import { DateRangeProvider } from './DateRangeContext';
 import { ReportsPage } from './pages/ReportsPage';
 
 type Tab =
-  | 'comparison'
   | 'tank'
+  | 'comparison'
   | 'utilization'
   | 'machines'
   | 'stale'
@@ -25,7 +25,7 @@ type Tab =
 export function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [tab, setTab] = useState<Tab>('comparison');
+  const [tab, setTab] = useState<Tab>('tank');
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   // Any 401 (expired/invalid token) drops us back to the login screen.
@@ -61,7 +61,7 @@ export function App() {
   const logout = () => {
     api.logout();
     setUser(null);
-    setTab('comparison');
+    setTab('tank');
   };
 
   if (authChecking) {
@@ -76,7 +76,7 @@ export function App() {
   }
 
   const isAdmin = user.role === 'admin';
-  const activeTab: Tab = tab === 'users' && !isAdmin ? 'comparison' : tab;
+  const activeTab: Tab = tab === 'users' && !isAdmin ? 'tank' : tab;
 
   return (
     <div className="app">
@@ -85,11 +85,11 @@ export function App() {
           KOTEKS <span>STROJEVI</span>
         </div>
         <nav className="tabs">
-          <button className={activeTab === 'comparison' ? 'active' : ''} onClick={() => setTab('comparison')}>
-            Lidat vs Maris
-          </button>
           <button className={activeTab === 'tank' ? 'active' : ''} onClick={() => setTab('tank')}>
             Kontrola goriva
+          </button>
+          <button className={activeTab === 'comparison' ? 'active' : ''} onClick={() => setTab('comparison')}>
+            Lidat vs Maris
           </button>
           <button className={activeTab === 'utilization' ? 'active' : ''} onClick={() => setTab('utilization')}>
             Iskorištenost

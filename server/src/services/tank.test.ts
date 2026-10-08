@@ -14,7 +14,7 @@ process.env.DB_PATH ??= path.join(os.tmpdir(), 'koteks-gorivo-tank-test.db');
 for (const name of ['LIDAT_BASE_URL', 'LIDAT_USERNAME', 'LIDAT_PASSWORD', 'MARIS_BASE_URL', 'MARIS_CLIENT_ID', 'MARIS_CLIENT_SECRET']) {
   process.env[name] ??= 'http://placeholder.invalid';
 }
-const { analyseReadings, cancelReversals } = await import('./tank.js');
+const { analyseReadings, cancelReversals, engineOffSpans } = await import('./tank.js');
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -636,4 +636,28 @@ test('a small blip and its come-back do not cancel a real drop two days later', 
   });
   assert.equal(r.drains.length, 1, JSON.stringify(r.drains));
   near(r.drains[0].litres, 24, 4, 'drain litres');
+});
+
+// ---------------------------------------------------------------- engine off, for the charts
+
+test('engine off: one span per night when the machine goes quiet', () => {
+  const { hours } = simulate({ days: 3, nightLevelEveryMin: QUIET_NIGHTS });
+  const spans = engineOffSpans(hours);
+  // Mon 00:00 → 05:00 (the data starts at midnight), then each evening's last
+  // working reading to the next morning's first: Mon 12:55 → Tue 05:00, Tue → Wed.
+  assert.equal(spans.length, 3, JSON.stringify(spans));
+  assert.equal(spans[1].from, '2026-09-07T12:55:00Z');
+  assert.equal(spans[1].to, '2026-09-08T05:00:00Z');
+});
+
+test('engine off: also when the machine keeps reporting with the counter still', () => {
+  const { hours } = simulate({ days: 2, nightLevelEveryMin: 20 });
+  const spans = engineOffSpans(hours);
+  assert.ok(spans.length >= 2, JSON.stringify(spans));
+  assert.ok(spans.every((s) => Date.parse(s.to) - Date.parse(s.from) >= 30 * 60_000));
+});
+
+test('engine off: a machine working without a break has no span', () => {
+  const { hours } = simulate({ days: 1, workUtc: [0, 24], startLevel: 400, burnPerHour: 2 });
+  assert.equal(engineOffSpans(hours).length, 0);
 });

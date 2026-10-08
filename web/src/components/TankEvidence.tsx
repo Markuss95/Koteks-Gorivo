@@ -3,6 +3,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -273,7 +274,7 @@ export function EventEvidence({
       {readings && rows.length < 2 && <div className="muted">Nema očitanja razine u tom razdoblju.</div>}
       {rows.length >= 2 && (
         <>
-          <ResponsiveContainer width="100%" height={240}>
+          <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={rows} margin={{ left: 10, right: 20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2b3742" />
               <XAxis
@@ -294,6 +295,16 @@ export function EventEvidence({
                 labelFormatter={(t) => fmtDateTime(new Date(t as number).toISOString())}
                 formatter={(v: number, name) => [`${fmt(v, 1)} L`, name]}
               />
+              {readings?.engineOff.map((s) => (
+                <ReferenceArea
+                  key={`off-${s.from}`}
+                  x1={Date.parse(s.from)}
+                  x2={Date.parse(s.to)}
+                  fill="#8b9bab"
+                  fillOpacity={0.16}
+                  ifOverflow="hidden"
+                />
+              ))}
               {span.at !== null && <ReferenceLine x={span.at} stroke="#f85149" strokeDasharray="4 4" />}
               <Line
                 dataKey="measured"
@@ -323,6 +334,11 @@ export function EventEvidence({
             <span>
               <i style={{ background: '#4aa3ff', height: 2 }} /> Očekivano: prva razina − potrošnja motora + dolijevanja
             </span>
+            {readings && readings.engineOff.length > 0 && (
+              <span title="Brojač radnih sati motora je stajao barem 30 minuta">
+                <i style={{ background: 'rgba(139,155,171,0.35)', height: 10 }} /> Motor ugašen
+              </span>
+            )}
           </div>
           <details style={{ marginTop: 8 }}>
             <summary>Sva očitanja ({rows.length})</summary>
