@@ -13,7 +13,7 @@ import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
 import { GroupFilter } from '../components/GroupFilter';
 import { TankDetail } from '../components/TankDetail';
-import { CalibrationCell, ConfidenceBadge, ReviewBadge } from '../components/TankEvidence';
+import { CalibrationCell, ConfidenceBadge, counterSuspectText, ReviewBadge } from '../components/TankEvidence';
 import { EVENT_LABELS, clock, eventDetail, shiftDay } from '../tankText';
 
 // Fallback floor until the backend reports the authoritative value.
@@ -207,7 +207,9 @@ export function TankPage({
 
   const machines = useMemo<TankMachineSummary[]>(() => {
     if (!data) return [];
-    const loss = (m: TankMachineSummary) => Math.max(m.drainLitres, m.cycleMissingLitres);
+    // A shortfall a suspect counter explains isn't a loss.
+    const loss = (m: TankMachineSummary) =>
+      Math.max(m.drainLitres, m.calibration.counter.suspect ? 0 : m.cycleMissingLitres);
     const byColumn = compareBy(machineValue, sort);
     // Ties (e.g. same sensor class and step) put the biggest losses first.
     return data.machines
@@ -254,17 +256,23 @@ export function TankPage({
   const totals = useMemo(() => {
     const of = (k: TankEventKind) => groupEvents.filter((e) => e.kind === k);
     const litres = (list: TankEvent[]) => list.reduce((s, e) => s + e.litres, 0);
+    // Shortfalls on a machine whose counter is suspect aren't counted as losses.
+    const suspect = new Set(
+      (data?.machines ?? []).filter((m) => m.calibration.counter.suspect).map((m) => m.serialNumber),
+    );
+    const cycles = of('cycle_loss').filter((e) => !suspect.has(e.serialNumber));
     return {
       drains: of('drain').length,
       drainLitres: litres(of('drain')),
-      cycles: of('cycle_loss').length,
-      cycleLitres: litres(of('cycle_loss')),
+      cycles: cycles.length,
+      cycleLitres: litres(cycles),
+      cyclesSuspect: of('cycle_loss').length - cycles.length,
       mismatch: of('slip_mismatch').length,
       noRefuel: of('slip_no_refuel').length,
       slips: machines.reduce((s, m) => s + m.slipCount - m.slipUnchecked, 0),
       slipsOk: machines.reduce((s, m) => s + m.slipOk, 0),
     };
-  }, [groupEvents, machines]);
+  }, [groupEvents, machines, data]);
 
   // The card whose kind is the only one shown, if any.
   const focused = kinds.size === 1 ? [...kinds][0] : null;
@@ -364,6 +372,14 @@ export function TankPage({
           <div className="label">Manjak između punjenja</div>
           <div className={`value ${totals.cycles ? 'neg' : ''}`}>{totals.cycles}</div>
           <div className="sub">{fmt(totals.cycleLitres, 0)} L nije potrošio motor</div>
+          {totals.cyclesSuspect > 0 && (
+            <div
+              className="sub warn-text"
+              title="Na tim strojevima brojač potrošnje vjerojatno pokazuje krivo (odstupa više od 20 %), pa njihov manjak nije uračunat. Događaji su i dalje u popisu, označeni „provjeriti”."
+            >
+              + {totals.cyclesSuspect} nepouzdano (brojač), nije uračunato
+            </div>
+          )}
         </div>
         <div
           className={`card clickable${focused === 'slip_no_refuel' ? ' active' : ''}`}
@@ -468,9 +484,16 @@ export function TankPage({
                   <td className={`num ${m.drainCount ? 'neg' : ''}`}>
                     {m.drainCount ? `${m.drainCount} × · ${fmt(m.drainLitres, 0)}` : '—'}
                   </td>
-                  <td className={`num ${m.cycleMissingLitres >= 30 ? 'neg' : ''}`}>
+                  <td
+                    className={`num ${m.calibration.counter.suspect ? 'warn-text' : m.cycleMissingLitres >= 30 ? 'neg' : ''}`}
+                    title={
+                      m.cycleCount && m.calibration.counter.suspect
+                        ? `Nepouzdano: ${counterSuspectText(m.calibration)}`
+                        : undefined
+                    }
+                  >
                     {m.cycleCount
-                      ? `${fmt(m.cycleMissingLitres, 0)} L od ${fmt(m.cycleRefilledLitres, 0)} L`
+                      ? `${fmt(m.cycleMissingLitres, 0)} L od ${fmt(m.cycleRefilledLitres, 0)} L${m.calibration.counter.suspect ? ' ?' : ''}`
                       : '—'}
                   </td>
                 </tr>

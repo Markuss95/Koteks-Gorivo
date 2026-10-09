@@ -211,7 +211,8 @@ export type CheckStatus = 'ok' | 'off' | 'unknown';
 /** The machine against what is metered, over the 30 days up to the range end. */
 export interface TankCalibration {
   maris: { status: CheckStatus; ratio: number | null; slips: number }; // tank rise ÷ booked
-  counter: { status: CheckStatus; ratio: number | null; burnedLitres: number }; // level drop ÷ burned
+  // level drop ÷ burned; suspect: off by over 20 %, so fill-to-fill shortfalls can't be trusted
+  counter: { status: CheckStatus; ratio: number | null; burnedLitres: number; suspect: boolean };
 }
 
 export interface EventReason {

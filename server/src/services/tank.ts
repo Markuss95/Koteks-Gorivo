@@ -145,6 +145,11 @@ const MARIS_CHECK_MIN_SLIPS = 3;
 const MARIS_AGREE = 0.15;
 const COUNTER_CHECK_MIN_LITRES = 100;
 const COUNTER_AGREE = 0.15;
+// Short of agreeing, a ratio off by more than this (even on a sensor too rough to
+// be sure) makes the counter suspect: a fill-to-fill shortfall then likely comes
+// from the counter, not from fuel that left (57330: level fell 1.44× what the
+// counter burned, and Maris refills said the same).
+const COUNTER_SUSPECT = 0.2;
 // No reading for this long and the machine stood still; its next readings are a rest point.
 const REST_GAP_HOURS = 3;
 // A rest point's level: the median of its first readings within this many minutes.
@@ -270,7 +275,12 @@ export type CheckStatus = 'ok' | 'off' | 'unknown';
 /** The machine against what is metered (see CALIBRATION_DAYS). */
 export interface TankCalibration {
   maris: { status: CheckStatus; ratio: number | null; slips: number }; // tank rise ÷ booked
-  counter: { status: CheckStatus; ratio: number | null; burnedLitres: number }; // level drop ÷ burned, working
+  counter: {
+    status: CheckStatus;
+    ratio: number | null;
+    burnedLitres: number;
+    suspect: boolean; // see COUNTER_SUSPECT: fill-to-fill shortfalls can't be trusted
+  }; // level drop ÷ burned, working
 }
 
 export interface EventReason {
@@ -1442,15 +1452,22 @@ function calibrate(
     burned += used;
     pairs++;
   }
-  let counter: TankCalibration['counter'] = { status: 'unknown', ratio: null, burnedLitres: round1(burned) };
+  let counter: TankCalibration['counter'] = {
+    status: 'unknown',
+    ratio: null,
+    burnedLitres: round1(burned),
+    suspect: false,
+  };
   if (burned >= COUNTER_CHECK_MIN_LITRES) {
     const ratio = fell / burned;
     const resolution = (Math.max(stepLitres, REST_READ_ERROR_LITRES) * Math.sqrt(2 * pairs)) / burned;
+    const status: CheckStatus =
+      resolution > COUNTER_AGREE ? 'unknown' : Math.abs(ratio - 1) <= COUNTER_AGREE + resolution ? 'ok' : 'off';
     counter = {
-      status:
-        resolution > COUNTER_AGREE ? 'unknown' : Math.abs(ratio - 1) <= COUNTER_AGREE + resolution ? 'ok' : 'off',
+      status,
       ratio: Math.round(ratio * 100) / 100,
       burnedLitres: round1(burned),
+      suspect: status !== 'ok' && Math.abs(ratio - 1) > COUNTER_SUSPECT,
     };
   }
   return { maris, counter };
@@ -1649,9 +1666,19 @@ function counterReason(cal: TankCalibration): EventReason {
   if (c.status === 'ok') {
     return okReason(`Senzor razine i brojač potrošnje se slažu dok stroj radi (omjer ${ratioText(c.ratio)})`);
   }
+  if (c.suspect) {
+    return checkReason(
+      `Razina pada ${c.ratio! > 1 ? 'više' : 'manje'} nego što brojač potrošnje bilježi (omjer ${ratioText(c.ratio)}) — brojač vjerojatno pokazuje ${c.ratio! > 1 ? 'premalo' : 'previše'}, pa manjak između punjenja nije pouzdan`,
+    );
+  }
   if (c.status === 'off') {
     return checkReason(
       `Senzor razine i brojač potrošnje se ne slažu dok stroj radi (omjer ${ratioText(c.ratio)}) — provjerite kapacitet spremnika i brojač`,
+    );
+  }
+  if (c.ratio !== null) {
+    return checkReason(
+      `Senzor razine je pregrub za sigurnu usporedbu s brojačem potrošnje (omjer ${ratioText(c.ratio)})`,
     );
   }
   return checkReason('Premalo rada u zadnjih 30 dana da bi se senzor razine usporedio s brojačem potrošnje');

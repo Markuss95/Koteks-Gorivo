@@ -567,6 +567,7 @@ test('sensor and counter agree from rest to rest: counter check ok', () => {
   const r = run({ days: 5, burnPerHour: 8, startLevel: 390, nightLevelEveryMin: QUIET_NIGHTS });
   assert.equal(r.calibration.counter.status, 'ok', JSON.stringify(r.calibration));
   near(r.calibration.counter.ratio!, 1, 0.1, 'ratio');
+  assert.equal(r.calibration.counter.suspect, false);
 });
 
 test('counter reading 30 % low: counter check off', () => {
@@ -586,6 +587,27 @@ test('counter reading 30 % low: counter check off', () => {
     stepLitres: 2,
   });
   assert.equal(r.calibration.counter.status, 'off', JSON.stringify(r.calibration));
+  assert.equal(r.calibration.counter.suspect, true);
+});
+
+test('counter reading 30 % low on a rough sensor: too rough to judge, but suspect', () => {
+  const { levels, fuel, hours, capacity } = simulate({
+    days: 5,
+    burnPerHour: 8,
+    startLevel: 390,
+    nightLevelEveryMin: QUIET_NIGHTS,
+  });
+  const r = analyseReadings({
+    levels,
+    fuel: fuel.map((f) => ({ ms: f.ms, cum: Math.round(f.cum * 0.7 * 10) / 10 })),
+    hours,
+    slips: [],
+    capacity,
+    quality: 'coarse',
+    stepLitres: 87,
+  });
+  assert.equal(r.calibration.counter.status, 'unknown', JSON.stringify(r.calibration));
+  assert.equal(r.calibration.counter.suspect, true, JSON.stringify(r.calibration));
 });
 
 test('slips agree with the sensor: Maris check ok', () => {

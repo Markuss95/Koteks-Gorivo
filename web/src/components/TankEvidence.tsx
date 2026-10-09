@@ -80,7 +80,8 @@ export function ReviewBadge({ review }: { review: TankReview | null }) {
 // What each check means, shown on hover.
 const CHECK_HELP_LEGEND =
   'Zadnjih 30 dana. ✓ slaže se · ✗ ne slaže se · ? još premalo podataka. Broj je omjer (1,00 = savršeno slaganje).\n' +
-  'Ne mijenja nikakve brojke — samo odlučuje mogu li događaji ovog stroja biti „siguran” ili traže „provjeriti”.';
+  'Ne mijenja nikakve brojke — samo odlučuje mogu li događaji ovog stroja biti „siguran” ili traže „provjeriti”. ' +
+  'Kad brojač odstupa više od 20 % (žuto), manjak između punjenja označen je kao nepouzdan.';
 const MARIS_HELP =
   'Maris: odgovara li porast razine pri svakom punjenju litrama s izdatnice? Ako ne, kapacitet spremnika u ' +
   `LiDAT-u vjerojatno je krivo zadan.\n\n${CHECK_HELP_LEGEND}`;
@@ -88,6 +89,16 @@ const COUNTER_HELP =
   'Brojač: pada li razina u spremniku za onoliko koliko je motor potrošio prema brojaču potrošnje?' +
   `\n\n${CHECK_HELP_LEGEND}`;
 const HELP_STYLE = { cursor: 'help' } as const;
+
+/**
+ * When the counter is suspect (off by over 20 %), why fill-to-fill shortfalls
+ * can't be trusted; null when they can.
+ */
+export function counterSuspectText(calibration: TankCalibration): string | null {
+  const c = calibration.counter;
+  if (!c.suspect || c.ratio === null) return null;
+  return `brojač potrošnje vjerojatno pokazuje ${c.ratio > 1 ? 'premalo' : 'previše'} (razina pada ${ratioText(c.ratio)} × brojač)`;
+}
 
 export function CalibrationCell({ calibration }: { calibration: TankCalibration }) {
   const { maris, counter } = calibration;
@@ -97,8 +108,8 @@ export function CalibrationCell({ calibration }: { calibration: TankCalibration 
         Maris {CHECK[maris.status].mark} {ratioText(maris.ratio)}
       </span>
       <span className="muted"> · </span>
-      <span className={CHECK[counter.status].cls} title={COUNTER_HELP} style={HELP_STYLE}>
-        brojač {CHECK[counter.status].mark} {ratioText(counter.ratio)}
+      <span className={counter.suspect ? 'warn-text' : CHECK[counter.status].cls} title={COUNTER_HELP} style={HELP_STYLE}>
+        brojač {counter.suspect ? '!' : CHECK[counter.status].mark} {ratioText(counter.ratio)}
       </span>
     </span>
   );
@@ -121,8 +132,10 @@ export function CalibrationLine({ calibration }: { calibration: TankCalibration 
       ;{' '}
       <span title={COUNTER_HELP} style={HELP_STYLE}>
         brojač potrošnje —{' '}
-        <span className={CHECK[counter.status].cls}>
-          {CHECK[counter.status].text}
+        <span className={counter.suspect ? 'warn-text' : CHECK[counter.status].cls}>
+          {counter.suspect
+            ? `vjerojatno pokazuje ${counter.ratio! > 1 ? 'premalo' : 'previše'}`
+            : CHECK[counter.status].text}
           {counter.ratio !== null && ` (omjer ${ratioText(counter.ratio)})`}
         </span>
         <span className="muted">, {fmt(counter.burnedLitres, 0)} L potrošnje za usporedbu</span>

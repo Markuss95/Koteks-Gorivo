@@ -15,7 +15,7 @@ import type { SensorQuality, SlipStatus, TankDetail as TankDetailData, TankDrain
 import { fmt, fmtDate, fmtDateTime, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
-import { CalibrationLine, ConfidenceBadge, EventEvidence, ReviewBadge } from './TankEvidence';
+import { CalibrationLine, ConfidenceBadge, counterSuspectText, EventEvidence, ReviewBadge } from './TankEvidence';
 
 // Same floor as the other detail drawers.
 const DATE_FLOOR = '2026-06-04';
@@ -178,6 +178,8 @@ export function TankDetail({
   }, [data]);
 
   const cap = data?.tankCapacity ?? null;
+  // A suspect counter makes every fill-to-fill shortfall unreliable.
+  const counterSuspect = data ? counterSuspectText(data.calibration) : null;
   // Show the wavering column only when some drop partly came back.
   const drainsWavered = !!data?.drains.some((d) => d.returnedLitres >= 1);
 
@@ -272,14 +274,19 @@ export function TankDetail({
               </div>
               <div className="card">
                 <div className="label">Manjak između punjenja</div>
-                <div className={`value ${totals.cycleMissing >= 30 ? 'neg' : ''}`}>
-                  {data.cycles.length ? `${fmt(totals.cycleMissing, 0)} L` : '—'}
+                <div
+                  className={`value ${counterSuspect ? 'warn-text' : totals.cycleMissing >= 30 ? 'neg' : ''}`}
+                >
+                  {data.cycles.length ? `${fmt(totals.cycleMissing, 0)} L${counterSuspect ? ' ?' : ''}` : '—'}
                 </div>
                 <div className="sub">
                   {data.cycles.length
                     ? `od ${fmt(totals.cycleRefilled, 0)} L uliveno`
                     : 'nema dva punjenja do punog'}
                 </div>
+                {counterSuspect && data.cycles.length > 0 && (
+                  <div className="sub warn-text">nepouzdano: {counterSuspect}</div>
+                )}
               </div>
               {data.sensor === 'fine' && (
                 <div className="card">
@@ -573,6 +580,13 @@ export function TankDetail({
                 izašlo je na drugi način. Uliveno se uzima iz Marisa kad se izdatnica slaže sa senzorom,
                 inače sa senzora.
               </div>
+              {counterSuspect && data.cycles.length > 0 && (
+                <div className="hint-box" style={{ marginTop: 0, marginBottom: 12 }}>
+                  Nepouzdano: {counterSuspect}. Tada „Motor potrošio” i „Nedostaje” ne vrijede — manjak je
+                  vjerojatno greška brojača, a ne gorivo koje je nestalo. Provjera na terenu: jedan dan
+                  zabilježite točno uliveno gorivo i radne sate te ih usporedite s brojačem.
+                </div>
+              )}
               <table>
                 <thead>
                   <tr>
@@ -601,7 +615,9 @@ export function TankDetail({
                           : '—'}
                       </td>
                       <td className="num">{fmt(c.burnedLitres, 0)}</td>
-                      <td className={`num ${c.missingLitres >= 30 ? 'neg' : ''}`}>{fmt(c.missingLitres, 0)}</td>
+                      <td className={`num ${counterSuspect ? 'warn-text' : c.missingLitres >= 30 ? 'neg' : ''}`}>
+                        {fmt(c.missingLitres, 0)}
+                      </td>
                     </tr>
                   ))}
                   {data.cycles.length === 0 && (

@@ -149,6 +149,7 @@ tbody tr.clickable { cursor: pointer; }
 
 .pos { color: var(--good); }
 .neg { color: var(--bad); }
+.warn-text { color: var(--warn); }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
 .pill.warn { color: var(--warn); border-color: var(--warn); }
 .muted { color: var(--muted); }
