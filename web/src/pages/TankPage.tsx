@@ -591,6 +591,9 @@ export function TankPage({
                 {eventTh('Vrijeme', 'time')}
                 {eventTh('Stroj', 'machine')}
                 {eventTh('Senzor razine', 'sensor')}
+                <th title="Usporedba senzora razine s izdatnicama (Maris) i s brojačem potrošnje, zadnjih 30 dana">
+                  Provjera senzora
+                </th>
                 {eventTh('Vrsta', 'kind')}
                 {eventTh('Opis', 'litres')}
                 {eventTh('Pouzdanost', 'confidence')}
@@ -613,6 +616,13 @@ export function TankPage({
                   <td className="muted">
                     {sensorText(machineBySerial.get(e.serialNumber))}
                   </td>
+                  <td>
+                    {machineBySerial.has(e.serialNumber) ? (
+                      <CalibrationCell calibration={machineBySerial.get(e.serialNumber)!.calibration} />
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
                   <td className={e.kind === 'refuel_awaiting_slip' ? 'muted' : e.kind === 'refuel_no_slip' ? '' : 'neg'}>
                     {EVENT_LABELS[e.kind]}
                   </td>
@@ -627,7 +637,7 @@ export function TankPage({
               ))}
               {events.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                  <td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 30 }}>
                     Nema sumnjivih događaja u odabranom razdoblju.
                   </td>
                 </tr>
