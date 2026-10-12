@@ -64,10 +64,16 @@ function nextSort<K>(key: K) {
     s && s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: -1 };
 }
 
-type EventSortKey = 'date' | 'time' | 'machine' | 'kind' | 'litres' | 'confidence' | 'review';
+type EventSortKey = 'date' | 'time' | 'machine' | 'sensor' | 'kind' | 'litres' | 'confidence' | 'review';
 
-function eventValue(e: TankEvent, key: EventSortKey): number | string | null {
+function eventValue(
+  e: TankEvent,
+  key: EventSortKey,
+  machine: TankMachineSummary | undefined,
+): number | string | null {
   switch (key) {
+    case 'sensor':
+      return machine ? sensorRank(machine) : null;
     case 'date':
       return `${e.day} ${e.time ?? ''}`;
     case 'time':
@@ -100,12 +106,27 @@ type MachineSortKey =
 const SENSOR_RANK: Record<SensorQuality, number> = { fine: 3, coarse: 2, unknown: 1, none: 0 };
 const NO_STEP = 999_999;
 
+function sensorRank(m: TankMachineSummary) {
+  return SENSOR_RANK[m.sensor] * 1_000_000 - Math.min(m.sensorStepLitres ?? NO_STEP, NO_STEP);
+}
+
+/** e.g. "precizan (~2 L)"; the step only where the sensor class has one. */
+function sensorText(m: TankMachineSummary | undefined) {
+  if (!m) return '—';
+  return (
+    SENSOR_LABELS[m.sensor] +
+    ((m.sensor === 'fine' || m.sensor === 'coarse') && m.sensorStepLitres != null
+      ? ` (~${fmt(m.sensorStepLitres, 0)} L)`
+      : '')
+  );
+}
+
 function machineValue(m: TankMachineSummary, key: MachineSortKey): number | string | null {
   switch (key) {
     case 'model':
       return `${shortModel(m.model)} ${m.serialNumber}`;
     case 'sensor':
-      return SENSOR_RANK[m.sensor] * 1_000_000 - Math.min(m.sensorStepLitres ?? NO_STEP, NO_STEP);
+      return sensorRank(m);
     case 'slipOkShare': {
       const slips = m.slipCount - m.slipUnchecked;
       return slips > 0 ? m.slipOk / slips : null;
@@ -234,12 +255,17 @@ export function TankPage({
     () => (data ? data.events.filter((e) => groups.has(e.group)) : []),
     [data, groups],
   );
+  const machineBySerial = useMemo(
+    () => new Map((data?.machines ?? []).map((m) => [m.serialNumber, m])),
+    [data],
+  );
   const events = useMemo(() => {
     const rows = groupEvents.filter(
       (e) => kinds.has(e.kind) && (!onlySure || e.confidence === 'sure') && (!onlyUnreviewed || !e.review),
     );
-    return eventSort ? rows.sort(compareBy(eventValue, eventSort)) : rows;
-  }, [groupEvents, kinds, eventSort, onlySure, onlyUnreviewed]);
+    const valueOf = (e: TankEvent, key: EventSortKey) => eventValue(e, key, machineBySerial.get(e.serialNumber));
+    return eventSort ? rows.sort(compareBy(valueOf, eventSort)) : rows;
+  }, [groupEvents, kinds, eventSort, onlySure, onlyUnreviewed, machineBySerial]);
 
   // How each kind of finding has held up on site so far (all reviews, not just this range).
   const reviewSummary = useMemo(() => {
@@ -458,12 +484,7 @@ export function TankPage({
                       </span>
                     )}
                   </td>
-                  <td className="muted">
-                    {SENSOR_LABELS[m.sensor]}
-                    {(m.sensor === 'fine' || m.sensor === 'coarse') &&
-                      m.sensorStepLitres != null &&
-                      ` (~${fmt(m.sensorStepLitres, 0)} L)`}
-                  </td>
+                  <td className="muted">{sensorText(m)}</td>
                   <td>
                     <CalibrationCell calibration={m.calibration} />
                   </td>
@@ -569,6 +590,7 @@ export function TankPage({
                 {eventTh('Datum', 'date')}
                 {eventTh('Vrijeme', 'time')}
                 {eventTh('Stroj', 'machine')}
+                {eventTh('Senzor razine', 'sensor')}
                 {eventTh('Vrsta', 'kind')}
                 {eventTh('Opis', 'litres')}
                 {eventTh('Pouzdanost', 'confidence')}
@@ -588,6 +610,9 @@ export function TankPage({
                   <td>
                     <strong>{shortModel(e.model)}</strong> <span className="muted">{e.serialNumber}</span>
                   </td>
+                  <td className="muted">
+                    {sensorText(machineBySerial.get(e.serialNumber))}
+                  </td>
                   <td className={e.kind === 'refuel_awaiting_slip' ? 'muted' : e.kind === 'refuel_no_slip' ? '' : 'neg'}>
                     {EVENT_LABELS[e.kind]}
                   </td>
@@ -602,7 +627,7 @@ export function TankPage({
               ))}
               {events.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 30 }}>
+                  <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 30 }}>
                     Nema sumnjivih događaja u odabranom razdoblju.
                   </td>
                 </tr>
