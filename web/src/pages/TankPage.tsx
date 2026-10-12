@@ -33,9 +33,9 @@ const EVENT_ORDER: TankEventKind[] = [
   'refuel_awaiting_slip',
 ];
 
-// Shown until the user changes the filter: every kind except refuels without a
-// slip or still waiting for one, which can be ticked on.
-const DEFAULT_KINDS = EVENT_ORDER.filter((k) => k !== 'refuel_no_slip' && k !== 'refuel_awaiting_slip');
+// Shown until the user changes the filter: only drains; the other kinds can be
+// ticked on.
+const DEFAULT_KINDS: TankEventKind[] = ['drain'];
 
 export const SENSOR_LABELS: Record<SensorQuality, string> = {
   fine: 'precizan',
@@ -353,7 +353,7 @@ export function TankPage({
         </div>
       )}
 
-      {/* Clicking a card narrows the events list to that kind (again = all kinds). */}
+      {/* Clicking a card narrows the events list to that kind (again = default kinds). */}
       <div className="cards">
         <div
           className={`card clickable${focused === 'drain' ? ' active' : ''}`}
