@@ -679,7 +679,8 @@ interface Step {
 /**
  * Persistent upward steps in `values`: one reading jumps more than half the
  * threshold AND the median of the next K readings is at least the full
- * threshold above the median of the previous K. Steps within MERGE_HOURS are one event.
+ * threshold above the median of the previous K. Steps within MERGE_HOURS are one
+ * event, and so are steps fewer than K readings apart across a silence.
  */
 function findSteps(
   values: number[],
@@ -688,14 +689,24 @@ function findSteps(
   usable: (i: number) => boolean = () => true,
 ): Step[] {
   const out: Step[] = [];
+  const jump = (i: number) => values[i] - values[i - 1];
   for (let i = K; i + K <= values.length; i++) {
     if (!usable(i)) continue;
-    if (values[i] - values[i - 1] <= threshold / 2) continue;
+    if (jump(i) <= threshold / 2) continue;
     const before = median(values.slice(i - K, i));
     const after = median(values.slice(i, i + K));
     if (after - before < threshold) continue;
     const last = out[out.length - 1];
     if (last && ms[i] - ms[last.end] < MERGE_HOURS * HOUR_MS) {
+      last.end = i;
+      last.after = Math.max(last.after, after);
+      continue;
+    }
+    // The last step's readings after it reached past a silence to this one's
+    // (131009, 12.10: a wobble at the last reading before the silence, the fill
+    // first seen after it): one change, not two, at whichever reading jumped more.
+    if (last && i - last.end < K) {
+      if (jump(i) > jump(last.start)) last.start = i;
       last.end = i;
       last.after = Math.max(last.after, after);
       continue;
@@ -832,8 +843,14 @@ function detectDrains(
   });
 
   // A rise between a drop and its hold readings is already in that drop's size.
+  // An unbooked fill between the drop's first and last fall is the reading coming
+  // back (131009, 12.10: a dip, its come-back, then the real drop) — not fuel going in.
   for (const c of candidates) {
     for (const r of rises) if (r.from >= ms[c.s.start - 1] && r.from < c.heldUntil) r.used = true;
+    for (const f of unbookedFills) {
+      const t = Date.parse(f.time);
+      if (t > ms[c.s.start - 1] && t <= ms[c.s.end]) phantomFills.add(f.time);
+    }
   }
   // Smaller drops (below the threshold, never reported) are paired too, so a rise
   // that belongs with one of them can't cancel some other drop further away.

@@ -312,6 +312,41 @@ test('a small come-back goes to the nearest drop, not one two days earlier', () 
   near(r.drains[1].litres, 40, 4, 'second drain net of its own come-back');
 });
 
+test('a dip that comes back within minutes, then a real drop: one drain, no phantom refuel', () => {
+  // 131009 on 12.10: the come-back was inside the drop that followed, so it was
+  // counted in the drop's size and still left over as a refuel nobody booked.
+  const r = run({
+    capacity: 250,
+    startLevel: 200,
+    days: 2,
+    events: [
+      { offset: -17.5, from: '2026-09-07T05:15:00Z', to: '2026-09-07T05:25:00Z' },
+      { drain: 22, at: '2026-09-07T05:45:00Z' },
+    ],
+  });
+  assert.equal(r.drains.length, 1, JSON.stringify(r.drains));
+  near(r.drains[0].litres, 22, 4, 'drain litres');
+  assert.equal(r.refuels.length, 0, JSON.stringify(r.refuels));
+  assert.equal(r.unmatched.length, 0, JSON.stringify(r.unmatched));
+});
+
+test('a real fill soon after a dip and a drop is still a refuel', () => {
+  // The dip's come-back is too small to be a refuel; the fill an hour later must
+  // not be taken for it.
+  const r = run({
+    days: 2,
+    events: [
+      { offset: -20, from: '2026-09-07T05:15:00Z', to: '2026-09-07T05:25:00Z' },
+      { drain: 30, at: '2026-09-07T05:45:00Z' },
+      { fill: 60, at: '2026-09-07T07:00:00Z' },
+    ],
+  });
+  assert.equal(r.drains.length, 1, JSON.stringify(r.drains));
+  near(r.drains[0].litres, 30, 4, 'drain litres');
+  assert.equal(r.refuels.length, 1, JSON.stringify(r.refuels));
+  assert.equal(r.unmatched.length, 1, JSON.stringify(r.unmatched));
+});
+
 test('noisy sensor (15 L steps): a one-step wobble does not cancel a three-step drop', () => {
   const r = run(
     {
@@ -418,6 +453,48 @@ test('counter that resets daily still shows a theft within a day', () => {
 test('counter a couple of minutes off the level readings: night theft still found', () => {
   const r = run({ counterOffsetMin: 2, nightLevelEveryMin: 30, events: [{ drain: 40, at: '2026-09-08T21:00:00Z' }] });
   assert.equal(r.drains.length, 1, JSON.stringify(r.drains));
+});
+
+// ---------------------------------------------------------------- a wobble just before a silence
+
+test('fill while offline, the last reading before it came back from a dip: one refuel, no cycle', () => {
+  // 131009 on 12.10: the step at the last reading before the silence already saw
+  // the full tank after it, so the fill was counted twice, and the zero-length
+  // fill-to-fill cycle between the copies showed the whole slip as missing.
+  const r = run(
+    {
+      capacity: 250,
+      startLevel: 150,
+      days: 3,
+      events: [
+        { offset: -12, from: '2026-09-07T12:45:00Z', to: '2026-09-07T12:50:00Z' },
+        { offline: true, from: '2026-09-07T12:51:00Z', to: '2026-09-08T05:30:00Z' },
+        { fill: 145, at: '2026-09-07T18:00:00Z' },
+      ],
+    },
+    [slip('2026-09-07', 145)],
+  );
+  assert.equal(r.refuels.length, 1, JSON.stringify(r.refuels));
+  assert.equal(r.refuels[0].prevTime, '2026-09-07T12:50:00Z');
+  assert.equal(r.refuels[0].time, '2026-09-08T05:30:00Z');
+  assert.equal(r.cycles.length, 0, JSON.stringify(r.cycles));
+  assert.equal(r.checks[0].status, 'ok', JSON.stringify(r.checks));
+  assert.equal(r.unmatched.length, 0, JSON.stringify(r.unmatched));
+});
+
+test('theft while offline, the last reading before it came back from a spike: one drain, not two', () => {
+  const r = run({
+    days: 3,
+    events: [
+      { offset: 12, from: '2026-09-07T12:45:00Z', to: '2026-09-07T12:50:00Z' },
+      { offline: true, from: '2026-09-07T12:51:00Z', to: '2026-09-08T05:00:00Z' },
+      { drain: 40, at: '2026-09-07T21:00:00Z' },
+    ],
+  });
+  assert.equal(r.drains.length, 1, JSON.stringify(r.drains));
+  near(r.drains[0].litres, 40, 4, 'drain litres');
+  assert.equal(r.drains[0].prevTime, '2026-09-07T12:50:00Z');
+  assert.equal(r.drains[0].time, '2026-09-08T05:00:00Z');
 });
 
 // ---------------------------------------------------------------- slips
