@@ -65,6 +65,27 @@ function machineLabel(m: MachineComparison): string {
   return `${shortModel(m.model)} ${m.serialNumber}`;
 }
 
+/** Main-table label: a machine compared only up to the day it went quiet gets a "*". */
+function comparedLabel(m: MachineComparison): string {
+  return m.comparedUntil ? `${machineLabel(m)} *` : machineLabel(m);
+}
+
+/** The "*" footnotes under the main table, one per machine that went quiet. */
+function cutOffNotes(rows: MachineComparison[], from: string): string[] {
+  return rows
+    .filter((m) => m.comparedUntil)
+    .map((m) => {
+      const after =
+        m.marisAfterCutoffLitres > 0
+          ? ` Izdano nakon toga (${fmt(m.marisAfterCutoffLitres, 1)} L) nije uključeno.`
+          : '';
+      return (
+        `* ${machineLabel(m)}: LiDAT podaci samo do ${fmtDateTime(m.lidatSilentSince)} — ` +
+        `Maris i LiDAT uspoređeni za ${fmtRange(from, m.comparedUntil!)}.${after}`
+      );
+    });
+}
+
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
@@ -193,7 +214,7 @@ export async function exportComparisonExcel(
 
   const dataRows = rows.map((m) => {
     const base: Array<string | number | null> = [
-      machineLabel(m),
+      comparedLabel(m),
       m.rnalogs.join(', ') || '—',
       round1(m.marisIssuedLitres),
       m.lidatConsumedLitres === null ? null : round1(m.lidatConsumedLitres),
@@ -216,6 +237,8 @@ export async function exportComparisonExcel(
       totalsPct === null ? null : round1(totalsPct),
     ],
   ];
+  const notes = cutOffNotes(rows, from);
+  if (notes.length > 0) footer.push([], ...notes.map((n) => [n]));
 
   // Machines the matched report left out, appended below the totals and split by
   // which side is missing. Each group carries a one-line explanation.
@@ -337,7 +360,7 @@ export async function exportComparisonPdf(
       ...activityHead,
     ],
     ...rows.map((m) => [
-      machineLabel(m),
+      comparedLabel(m),
       m.rnalogs.join(', ') || '—',
       { text: fmt(m.marisIssuedLitres, 1), alignment: 'right' },
       { text: m.lidatConsumedLitres === null ? '—' : fmt(m.lidatConsumedLitres, 1), alignment: 'right' },
@@ -346,6 +369,7 @@ export async function exportComparisonPdf(
       ...activityRow(m.serialNumber),
     ]),
   ];
+  const notes = cutOffNotes(rows, from);
 
   const totalsPct = totalsVariancePct(data.totals);
   const summary = {
@@ -394,6 +418,7 @@ export async function exportComparisonPdf(
         },
         layout: zebraLayout,
       },
+      ...(notes.length > 0 ? [{ stack: notes, color: '#555555', fontSize: 8, margin: [0, 6, 0, 0] }] : []),
       ...excludedSection(excluded),
     ],
     footer: pageFooter,

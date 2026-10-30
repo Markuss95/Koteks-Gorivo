@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { MachinePosition, MachineSeries } from '../types';
-import { fmt, fmtDateTime, isStale, shortModel, today } from '../util';
+import { fmt, fmtDateTime, fmtRange, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
 
@@ -86,7 +86,14 @@ export function MachineDetail({
       }));
   }, [data]);
 
-  const marisTotal = data?.marisItems.reduce((s, i) => s + (i.kolicina || 0), 0) ?? 0;
+  // A machine that went quiet before the end is compared only up to comparedUntil,
+  // so the card sums the same slips the comparison table does.
+  const cutoff = data?.lidat.comparedUntil ?? null;
+  const inCompared = (datum: string) => !cutoff || datum.slice(0, 10) <= cutoff;
+  const marisTotal =
+    data?.marisItems.reduce((s, i) => (inCompared(i.datum) ? s + (i.kolicina || 0) : s), 0) ?? 0;
+  const marisAfterCutoff =
+    data?.marisItems.reduce((s, i) => (inCompared(i.datum) ? s : s + (i.kolicina || 0)), 0) ?? 0;
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
@@ -122,7 +129,9 @@ export function MachineDetail({
               <div className="card">
                 <div className="label">Maris izdano</div>
                 <div className="value maris">{fmt(marisTotal, 1)} L</div>
-                <div className="sub">{data.marisItems.length} izdatnica</div>
+                <div className="sub">
+                  {data.marisItems.filter((i) => inCompared(i.datum)).length} izdatnica
+                </div>
               </div>
               <div className="card">
                 <div className="label">LiDAT potrošeno</div>
@@ -132,6 +141,15 @@ export function MachineDetail({
                 <div className="sub">{data.lidatReadings.length} očitanja</div>
               </div>
             </div>
+
+            {cutoff && (
+              <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+                * LiDAT podaci samo do {fmtDateTime(data.lidat.silentSince)} — Maris i LiDAT
+                uspoređeni za {fmtRange(from, cutoff)}.
+                {marisAfterCutoff > 0 &&
+                  ` Izdano nakon toga (${fmt(marisAfterCutoff, 1)} L) nije uključeno.`}
+              </div>
+            )}
 
             <div className="panel">
               <div className="panel-head">

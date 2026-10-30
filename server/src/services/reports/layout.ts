@@ -33,6 +33,27 @@ function machineLabel(m: MachineComparison): string {
   return `${shortModel(m.model)} ${m.serialNumber}`;
 }
 
+/** Main-table label: a machine compared only up to the day it went quiet gets a "*". */
+function comparedLabel(m: MachineComparison): string {
+  return m.comparedUntil ? `${machineLabel(m)} *` : machineLabel(m);
+}
+
+/** The "*" footnotes under the main table, one per machine that went quiet. */
+function cutOffNotes(rows: MachineComparison[], from: string): string[] {
+  return rows
+    .filter((m) => m.comparedUntil)
+    .map((m) => {
+      const after =
+        m.marisAfterCutoffLitres > 0
+          ? ` Izdano nakon toga (${fmt(m.marisAfterCutoffLitres, 1)} L) nije uključeno.`
+          : '';
+      return (
+        `* ${machineLabel(m)}: LiDAT podaci samo do ${fmtDateTime(m.lidatSilentSince)} — ` +
+        `Maris i LiDAT uspoređeni za ${fmtRange(from, m.comparedUntil!)}.${after}`
+      );
+    });
+}
+
 function activityLabel(m: MachineUtilization): string {
   return `${shortModel(m.model)} ${m.serialNumber}`;
 }
@@ -190,7 +211,7 @@ export function buildFuelExcel(input: FuelReportInput): Buffer {
   ];
 
   const dataRows = rows.map((m) => [
-    machineLabel(m),
+    comparedLabel(m),
     m.rnalogs.join(', ') || '—',
     round1(m.marisIssuedLitres),
     m.lidatConsumedLitres === null ? null : round1(m.lidatConsumedLitres),
@@ -210,6 +231,8 @@ export function buildFuelExcel(input: FuelReportInput): Buffer {
       variancePct === null ? null : round1(variancePct),
     ],
   ];
+  const notes = cutOffNotes(rows, from);
+  if (notes.length > 0) footer.push([], ...notes.map((n) => [n]));
 
   const groups = groupExcluded(excluded);
   const excludedBlock: Array<Array<string | number | null>> = [];
@@ -280,7 +303,7 @@ export function buildFuelPdf(input: FuelReportInput): Promise<Buffer> {
     ...rows.map((m) => {
       const [hours, perDay, days, idle, idlePct] = activityValues(activity.get(m.serialNumber));
       return [
-        machineLabel(m),
+        comparedLabel(m),
         m.rnalogs.join(', ') || '—',
         { text: fmt(m.marisIssuedLitres, 1), alignment: 'right' },
         { text: m.lidatConsumedLitres === null ? '—' : fmt(m.lidatConsumedLitres, 1), alignment: 'right' },
@@ -328,6 +351,10 @@ export function buildFuelPdf(input: FuelReportInput): Promise<Buffer> {
       layout: zebraLayout,
     },
   ];
+  const notes = cutOffNotes(rows, from);
+  if (notes.length > 0) {
+    content.push({ stack: notes, color: '#555555', fontSize: 8, margin: [0, 6, 0, 0] });
+  }
 
   const groups = groupExcluded(excluded);
   if (groups.length > 0) {

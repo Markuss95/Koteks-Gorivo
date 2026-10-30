@@ -217,6 +217,8 @@ api.get('/machines/:serial/series', async (req, res) => {
       consumedLitres: lidat.consumed,
       baselineCum: lidat.baselineCum,
       partial: lidat.partial,
+      comparedUntil: lidat.comparedUntil,
+      silentSince: lidat.silentSince,
     },
     lidatReadings: readings.map((r) => ({
       time: r.reading_time,

@@ -73,6 +73,11 @@ export interface MachineComparison {
   lidatEndTime: string | null;
   lidatReadingsInRange: number;
   lidatPartial: boolean;
+  // Machine went quiet before the end of the range: both sides compared only up
+  // to this day ('YYYY-MM-DD').
+  comparedUntil: string | null;
+  lidatSilentSince: string | null;
+  marisAfterCutoffLitres: number;
   differenceLitres: number | null;
   variancePct: number | null;
 }
@@ -395,7 +400,13 @@ export interface MachineSeries {
     locationTime: string | null;
   };
   // Period consumption computed on the server exactly like the comparison table.
-  lidat: { consumedLitres: number | null; baselineCum: number | null; partial: boolean };
+  lidat: {
+    consumedLitres: number | null;
+    baselineCum: number | null;
+    partial: boolean;
+    comparedUntil: string | null;
+    silentSince: string | null;
+  };
   lidatReadings: Array<{ time: string; fuelConsumedCum: number; fuelUnits: string | null }>;
   marisItems: Array<{
     datum: string;

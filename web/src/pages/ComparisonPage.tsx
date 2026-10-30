@@ -11,7 +11,16 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
-import { effectiveDateFloor, fmt, fmtDateTime, isStale, shortModel, today } from '../util';
+import {
+  effectiveDateFloor,
+  fmt,
+  fmtDate,
+  fmtDateTime,
+  fmtRange,
+  isStale,
+  shortModel,
+  today,
+} from '../util';
 import { MachineDetail } from '../components/MachineDetail';
 import { useDateRange } from '../DateRangeContext';
 import { DateField } from '../components/DateField';
@@ -323,6 +332,18 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
                       } — stroj nije uključen u zbrojeve`}
                     >
                       djelomično
+                    </span>
+                  )}
+                  {m.comparedUntil && (
+                    <span
+                      className="pill warn"
+                      title={`LiDAT podaci samo do ${fmtDateTime(m.lidatSilentSince)} — Maris i LiDAT uspoređeni za ${fmtRange(from, m.comparedUntil)}${
+                        m.marisAfterCutoffLitres > 0
+                          ? `; izdano nakon toga (${fmt(m.marisAfterCutoffLitres, 1)} L) nije uključeno`
+                          : ''
+                      }`}
+                    >
+                      * do {fmtDate(m.comparedUntil)}
                     </span>
                   )}
                 </td>

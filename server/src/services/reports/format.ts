@@ -32,11 +32,13 @@ export function fmtRange(from: string, to: string): string {
   return `${fileDate(from)} – ${fileDate(to)}`;
 }
 
+// Render runs on UTC; reports are read in Croatia.
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString('hr-HR', {
+    timeZone: 'Europe/Zagreb',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
