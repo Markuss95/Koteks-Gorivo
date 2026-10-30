@@ -47,6 +47,28 @@ export function fmtDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** '22.09.2026 u 13:29' in Croatian time — a moment inside a sentence. */
+export function fmtDayAtTime(iso: string): string {
+  const parts = new Intl.DateTimeFormat('hr-HR', {
+    timeZone: 'Europe/Zagreb',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso));
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
+  return `${p.day}.${p.month}.${p.year} u ${p.hour}:${p.minute}`;
+}
+
+/** 'YYYY-MM-DD' of the following calendar day. */
+export function nextDay(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 // LiDAT model is "Class:Series:Type:SpecificType"; drop the leading
 // classification so "Wheelloader:Large_size:L576:1333" reads as "L576:1333".
 export function shortModel(model: string): string {

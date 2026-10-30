@@ -8,7 +8,17 @@ import type { MachineComparison, ComparisonResult } from '../comparison.js';
 import type { MachineUtilization } from '../utilization.js';
 import type { Machine } from '../machines.js';
 import { groupExcluded, hasMaris, type FuelSelection } from './select.js';
-import { daysSince, fileDate, fmt, fmtDateTime, fmtRange, round1, shortModel } from './format.js';
+import {
+  daysSince,
+  fileDate,
+  fmt,
+  fmtDateTime,
+  fmtDayAtTime,
+  fmtRange,
+  nextDay,
+  round1,
+  shortModel,
+} from './format.js';
 
 export const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -38,19 +48,21 @@ function comparedLabel(m: MachineComparison): string {
   return m.comparedUntil ? `${machineLabel(m)} *` : machineLabel(m);
 }
 
-/** The "*" footnotes under the main table, one per machine that went quiet. */
+/**
+ * The "*" footnotes under the main table, one per machine that went quiet: why
+ * its later fuel is left out, how much, and the days actually compared.
+ */
 function cutOffNotes(rows: MachineComparison[], from: string): string[] {
   return rows
-    .filter((m) => m.comparedUntil)
+    .filter((m) => m.comparedUntil && m.lidatSilentSince)
     .map((m) => {
-      const after =
-        m.marisAfterCutoffLitres > 0
-          ? ` Izdano nakon toga (${fmt(m.marisAfterCutoffLitres, 1)} L) nije uključeno.`
-          : '';
-      return (
-        `* ${machineLabel(m)}: LiDAT podaci samo do ${fmtDateTime(m.lidatSilentSince)} — ` +
-        `Maris i LiDAT uspoređeni za ${fmtRange(from, m.comparedUntil!)}.${after}`
-      );
+      const stopped = `* ${machineLabel(m)}: LiDAT je prestao slati podatke ${fmtDayAtTime(m.lidatSilentSince!)}`;
+      const firstOut = fileDate(nextDay(m.comparedUntil!));
+      const compared = fmtRange(from, m.comparedUntil!);
+      return m.marisAfterCutoffLitres > 0
+        ? `${stopped}, pa gorivo izdano od ${firstOut} nadalje (${fmt(m.marisAfterCutoffLitres, 1)} L) ` +
+            `nije uključeno — Maris i LiDAT uspoređeni su samo za ${compared}.`
+        : `${stopped}, pa su Maris i LiDAT uspoređeni samo za ${compared} (od ${firstOut} nije izdano gorivo).`;
     });
 }
 

@@ -89,6 +89,43 @@ export function fmtRange(from: string, to: string): string {
   return `${noDot(from)} – ${noDot(to)}`;
 }
 
+/** '22.09.2026 u 13:29' in Croatian time — a moment inside a sentence. */
+export function fmtDayAtTime(iso: string): string {
+  const parts = new Intl.DateTimeFormat('hr-HR', {
+    timeZone: 'Europe/Zagreb',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso));
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
+  return `${p.day}.${p.month}.${p.year} u ${p.hour}:${p.minute}`;
+}
+
+/**
+ * Why a machine that went quiet is compared only part of the range: when LiDAT
+ * stopped, how much fuel issued from then on is left out, and the days compared.
+ * Same wording as the server's report footnote.
+ */
+export function cutOffNote(
+  silentSince: string,
+  comparedUntil: string,
+  from: string,
+  marisAfterLitres: number,
+): string {
+  const next = new Date(`${comparedUntil}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const firstOut = fmtDate(next.toISOString().slice(0, 10)).replace(/\.$/, '');
+  const stopped = `LiDAT je prestao slati podatke ${fmtDayAtTime(silentSince)}`;
+  const compared = fmtRange(from, comparedUntil);
+  return marisAfterLitres > 0
+    ? `${stopped}, pa gorivo izdano od ${firstOut} nadalje (${fmt(marisAfterLitres, 1)} L) ` +
+        `nije uključeno — Maris i LiDAT uspoređeni su samo za ${compared}.`
+    : `${stopped}, pa su Maris i LiDAT uspoređeni samo za ${compared} (od ${firstOut} nije izdano gorivo).`;
+}
+
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);

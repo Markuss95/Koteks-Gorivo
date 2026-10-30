@@ -12,11 +12,11 @@ import {
 import { api } from '../api';
 import type { ComparisonResult, MachineComparison, MachineGroup } from '../types';
 import {
+  cutOffNote,
   effectiveDateFloor,
   fmt,
   fmtDate,
   fmtDateTime,
-  fmtRange,
   isStale,
   shortModel,
   today,
@@ -334,14 +334,10 @@ export function ComparisonPage({ allowedGroups }: { allowedGroups: MachineGroup[
                       djelomično
                     </span>
                   )}
-                  {m.comparedUntil && (
+                  {m.comparedUntil && m.lidatSilentSince && (
                     <span
                       className="pill warn"
-                      title={`LiDAT podaci samo do ${fmtDateTime(m.lidatSilentSince)} — Maris i LiDAT uspoređeni za ${fmtRange(from, m.comparedUntil)}${
-                        m.marisAfterCutoffLitres > 0
-                          ? `; izdano nakon toga (${fmt(m.marisAfterCutoffLitres, 1)} L) nije uključeno`
-                          : ''
-                      }`}
+                      title={cutOffNote(m.lidatSilentSince, m.comparedUntil, from, m.marisAfterCutoffLitres)}
                     >
                       * do {fmtDate(m.comparedUntil)}
                     </span>

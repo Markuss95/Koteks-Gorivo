@@ -3,7 +3,7 @@
 // stroju"). Both libraries are lazy-imported so they only load when the user
 // exports.
 import type { ComparisonResult, Machine, MachineComparison, MachineUtilization } from './types';
-import { daysSince, fmt, fmtDate, fmtDateTime, fmtRange, shortModel } from './util';
+import { cutOffNote, daysSince, fmt, fmtDate, fmtDateTime, fmtRange, shortModel } from './util';
 
 // dd.mm.yyyy for filenames — fmtDate's trailing dot is dropped, since a dot
 // immediately before the extension reads as a typo and Windows strips trailing
@@ -73,17 +73,11 @@ function comparedLabel(m: MachineComparison): string {
 /** The "*" footnotes under the main table, one per machine that went quiet. */
 function cutOffNotes(rows: MachineComparison[], from: string): string[] {
   return rows
-    .filter((m) => m.comparedUntil)
-    .map((m) => {
-      const after =
-        m.marisAfterCutoffLitres > 0
-          ? ` Izdano nakon toga (${fmt(m.marisAfterCutoffLitres, 1)} L) nije uključeno.`
-          : '';
-      return (
-        `* ${machineLabel(m)}: LiDAT podaci samo do ${fmtDateTime(m.lidatSilentSince)} — ` +
-        `Maris i LiDAT uspoređeni za ${fmtRange(from, m.comparedUntil!)}.${after}`
-      );
-    });
+    .filter((m) => m.comparedUntil && m.lidatSilentSince)
+    .map(
+      (m) =>
+        `* ${machineLabel(m)}: ${cutOffNote(m.lidatSilentSince!, m.comparedUntil!, from, m.marisAfterCutoffLitres)}`,
+    );
 }
 
 function round1(n: number): number {

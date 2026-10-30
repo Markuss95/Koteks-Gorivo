@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { MachinePosition, MachineSeries } from '../types';
-import { fmt, fmtDateTime, fmtRange, isStale, shortModel, today } from '../util';
+import { cutOffNote, fmt, fmtDateTime, isStale, shortModel, today } from '../util';
 import { DateField } from './DateField';
 import { LocationMiniMap } from './LocationMiniMap';
 
@@ -142,12 +142,9 @@ export function MachineDetail({
               </div>
             </div>
 
-            {cutoff && (
+            {cutoff && data.lidat.silentSince && (
               <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
-                * LiDAT podaci samo do {fmtDateTime(data.lidat.silentSince)} — Maris i LiDAT
-                uspoređeni za {fmtRange(from, cutoff)}.
-                {marisAfterCutoff > 0 &&
-                  ` Izdano nakon toga (${fmt(marisAfterCutoff, 1)} L) nije uključeno.`}
+                * {cutOffNote(data.lidat.silentSince, cutoff, from, marisAfterCutoff)}
               </div>
             )}
 
